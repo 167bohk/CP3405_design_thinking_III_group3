@@ -39,19 +39,14 @@ st.set_page_config(
 st.markdown("""
 <style>
 
-/* Only apply when Streamlit is in dark theme */
-[data-theme="dark"] .stApp{
-background-color:#0f172a;
-color:white;
+.block-container{
+padding-top:2rem;
 }
 
-[data-theme="dark"] section[data-testid="stSidebar"]{
-background-color:#111827;
-}
-
-/* Metric styling */
-[data-testid="stMetricValue"]{
-font-size:28px;
+[data-testid="stMetric"]{
+background:rgba(255,255,255,0.04);
+padding:15px;
+border-radius:10px;
 }
 
 </style>
