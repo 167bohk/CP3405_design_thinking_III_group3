@@ -221,6 +221,18 @@ def create_chart(df):
 
     return fig
 
+# ---------- SEASONALITY ----------
+
+def best_six_months():
+
+    month=datetime.now().month
+
+    if month in [11,12,1,2,3,4]:
+        return "Bullish Season"
+    else:
+        return "Weak Season"
+ 
+    
 # ---------- AI MODEL ----------
 
 @st.cache_resource
@@ -241,7 +253,7 @@ def train_model(X,y):
 
 def price_forecast(df,window=20):
 
-    df = df.tail(500)
+    df = df.tail(400)
     df = df.dropna()
 
     features = [
@@ -284,10 +296,13 @@ def run_llm(prompt):
 
 # ---------- TABS ----------
 
-tab_chart,tab_ai,tab_heat,tab_news = st.tabs([
-"📊 Chart","🤖 AI Forecast","🌎 Heatmap","📰 News"
+tab_chart,tab_ai,tab_almanac,tab_heat,tab_news = st.tabs([
+"📊 Chart",
+"🤖 AI Forecast",
+"📅 Almanac",
+"🌎 Heatmap",
+"📰 News"
 ])
-
 # ---------- CHART ----------
 
 with tab_chart:
@@ -337,7 +352,11 @@ Give short outlook.
             model_signal="bullish" if pred_price>price else "bearish"
             trend_signal="bullish" if trend=="Bullish" else "bearish"
 
-            votes=[llm_signal,model_signal,trend_signal]
+            # NEW
+            best6 = best_six_months()
+            season_signal = "bullish" if best6=="Bullish Season" else "bearish"
+
+            votes=[llm_signal,model_signal,trend_signal,season_signal]
 
             bullish=votes.count("bullish")
             bearish=votes.count("bearish")
@@ -349,21 +368,23 @@ Give short outlook.
             else:
                 final_signal="HOLD"
 
-            confidence=max(bullish,bearish)/3
+            confidence=max(bullish,bearish)/4
 
             st.subheader("AI Trading Signal")
 
             st.write(f"""
-Trend: **{trend_signal.upper()}**
+            Trend: **{trend_signal.upper()}**
 
-XGBoost: **{model_signal.upper()}**
+            XGBoost: **{model_signal.upper()}**
 
-LLM: **{llm_signal.upper()}**
+            LLM: **{llm_signal.upper()}**
 
-Signal: **{final_signal}**
+            Seasonality: **{best6}**
 
-Confidence: **{confidence:.0%}**
-""")
+            Signal: **{final_signal}**
+
+            Confidence: **{confidence:.0%}**
+            """)
 
 # ---------- HEATMAP ----------
 
@@ -423,3 +444,98 @@ with tab_news:
         )
 
         st.divider()
+        
+# ---------- ALMANAC ----------
+
+with tab_almanac:
+
+    st.header("📅 Market Seasonality (Stock Trader's Almanac)")
+
+    col1,col2,col3 = st.columns(3)
+
+    # ---------- January Barometer ----------
+
+    spy = yf.download("SPY",period="2y",progress=False)
+
+    jan = spy[spy.index.month==1]
+
+    if len(jan)>5:
+
+        jan_return = (jan["Close"].iloc[-1]/jan["Close"].iloc[0])-1
+
+        jan_signal = "Bullish" if jan_return>0 else "Bearish"
+
+    else:
+
+        jan_signal="Waiting for January"
+
+    # ---------- First Five Days ----------
+
+    jan5 = jan.head(5)
+
+    if len(jan5)==5:
+
+        jan5_return=(jan5["Close"].iloc[-1]/jan5["Close"].iloc[0])-1
+
+        five_signal="Bullish" if jan5_return>0 else "Bearish"
+
+    else:
+
+        five_signal="Not available"
+
+    # ---------- Best Six Months ----------
+
+    month=datetime.now().month
+
+    if month in [11,12,1,2,3,4]:
+
+        best6="Bullish Season"
+
+    else:
+
+        best6="Weak Season"
+
+    with col1:
+
+        st.metric(
+        "January Barometer",
+        jan_signal
+        )
+
+    with col2:
+
+        st.metric(
+        "First Five Days",
+        five_signal
+        )
+
+    with col3:
+
+        st.metric(
+        "Best Six Months",
+        best6
+        )
+
+    st.divider()
+
+    # ---------- Presidential Cycle ----------
+
+    year=datetime.now().year
+
+    cycle=(year-2024)%4
+
+    if cycle==0:
+        pres="Election Year"
+
+    elif cycle==1:
+        pres="Post Election"
+
+    elif cycle==2:
+        pres="Midterm Weakness"
+
+    else:
+        pres="Pre Election Bullish"
+
+    st.subheader("Presidential Cycle")
+
+    st.info(pres)
