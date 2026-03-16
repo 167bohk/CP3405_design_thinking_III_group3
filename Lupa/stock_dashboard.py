@@ -83,14 +83,12 @@ def bigtech_changed():
     st.session_state.ticker = st.session_state.bigtech
 
 
-# ticker input
 st.sidebar.text_input(
 "Ticker",
 key="ticker",
 on_change=ticker_changed
 )
 
-# big tech selector
 st.sidebar.radio(
 "Big Tech",
 BIG_TECHS,
@@ -227,9 +225,9 @@ def create_chart(df):
     return fig
 
 
-# ---------- AI MODEL (RandomForest instead of LSTM) ----------
+# ---------- AI MODEL ----------
 
-def lstm_forecast(df, window=10):
+def price_forecast(df, window=10):
 
     prices = df["Close"].values
 
@@ -282,13 +280,13 @@ with tab_ai:
 
         st.subheader("AI Price Prediction")
 
-        lstm_price = lstm_forecast(df)
+        pred_price = price_forecast(df)
 
-        direction = "Bullish" if lstm_price > price else "Bearish"
+        direction = "Bullish" if pred_price > price else "Bearish"
 
         st.metric(
         "Predicted Price",
-        f"${lstm_price:.2f}",
+        f"${pred_price:.2f}",
         direction
         )
 
@@ -318,7 +316,28 @@ Give a short outlook.
             messages=[{"role":"user","content":prompt}]
             )
 
-            st.write(response.choices[0].message.content)
+            llm_text = response.choices[0].message.content
+
+            st.write(llm_text)
+
+            llm_signal = "bullish" if "bullish" in llm_text.lower() else "bearish"
+
+            model_signal = "bullish" if pred_price > price else "bearish"
+
+            if model_signal == llm_signal:
+                final_signal = "BUY" if model_signal == "bullish" else "SELL"
+            else:
+                final_signal = "HOLD"
+
+            st.subheader("AI Trading Signal")
+
+            st.write(f"""
+Model Signal: **{model_signal.upper()}**
+
+LLM Sentiment: **{llm_signal.upper()}**
+
+Final Decision: **{final_signal}**
+""")
 
     st.divider()
 
@@ -327,9 +346,9 @@ Give a short outlook.
     st.write(f"""
 Current Price: **${price:.2f}**
 
-AI Prediction: **${lstm_price:.2f}**
+AI Prediction: **${pred_price:.2f}**
 
-Expected Move: **{lstm_price-price:.2f}**
+Expected Move: **{pred_price-price:.2f}**
 """)
 
 
