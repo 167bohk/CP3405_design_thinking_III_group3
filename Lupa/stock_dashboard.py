@@ -52,7 +52,8 @@ font-size:28px;
 
 # ---------- LOGO ----------
 
-logo = Image.open("logo.png")
+logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
+logo = Image.open(logo_path)
 
 col_logo,col_title = st.columns([1,4])
 
