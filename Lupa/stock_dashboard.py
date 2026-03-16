@@ -1,3 +1,4 @@
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -11,9 +12,7 @@ import finnhub
 from openai import OpenAI
 import os
 
-from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
+from sklearn.ensemble import RandomForestRegressor
 
 
 # ---------- CONFIG ----------
@@ -74,15 +73,12 @@ if "bigtech" not in st.session_state:
 
 
 def ticker_changed():
-
     ticker = st.session_state.ticker.upper()
-
     if ticker in BIG_TECHS:
         st.session_state.bigtech = ticker
 
 
 def bigtech_changed():
-
     st.session_state.ticker = st.session_state.bigtech
 
 
@@ -116,7 +112,6 @@ index=2
 def load_data(symbol,period):
 
     stock = yf.Ticker(symbol)
-
     df = stock.history(period=period)
 
     df["MA20"] = df["Close"].rolling(20).mean()
@@ -144,6 +139,7 @@ if df.empty:
 price = df["Close"].iloc[-1]
 ret = df["Returns"].iloc[-1]
 
+
 # ---------- HEADER ----------
 
 st.markdown(f"## 📊 {symbol} Market Overview")
@@ -154,9 +150,7 @@ with col1:
     st.metric("Price",f"${price:.2f}",f"{ret:.2%}")
 
 with col2:
-
     trend="Bullish" if price>df["MA20"].iloc[-1] else "Bearish"
-
     st.metric("Trend",trend)
 
 with col3:
@@ -164,6 +158,7 @@ with col3:
 
 with col4:
     st.metric("RSI",f"{df['RSI'].iloc[-1]:.1f}")
+
 
 # ---------- MARKET SENTIMENT ----------
 
@@ -231,44 +226,31 @@ def create_chart(df):
     return fig
 
 
-# ---------- LSTM MODEL ----------
+# ---------- AI MODEL (RandomForest instead of LSTM) ----------
 
-def lstm_forecast(df, window=60):
+def lstm_forecast(df, window=10):
 
-    prices = df["Close"].values.reshape(-1,1)
+    prices = df["Close"].values
 
-    scaler = MinMaxScaler()
-    scaled = scaler.fit_transform(prices)
+    X = []
+    y = []
 
-    X=[]
-    y=[]
+    for i in range(window, len(prices)):
+        X.append(prices[i-window:i])
+        y.append(prices[i])
 
-    for i in range(window,len(scaled)):
+    X = np.array(X)
+    y = np.array(y)
 
-        X.append(scaled[i-window:i])
-        y.append(scaled[i])
+    model = RandomForestRegressor(n_estimators=100)
 
-    X=np.array(X)
-    y=np.array(y)
+    model.fit(X, y)
 
-    model=Sequential()
+    last_window = prices[-window:].reshape(1, -1)
 
-    model.add(LSTM(50,return_sequences=True,input_shape=(window,1)))
-    model.add(LSTM(50))
-    model.add(Dense(1))
+    pred = model.predict(last_window)
 
-    model.compile(optimizer="adam",loss="mse")
-
-    model.fit(X,y,epochs=3,batch_size=32,verbose=0)
-
-    last_window=scaled[-window:]
-    last_window=last_window.reshape(1,window,1)
-
-    pred_scaled=model.predict(last_window,verbose=0)
-
-    pred=scaler.inverse_transform(pred_scaled)
-
-    return float(pred[0][0])
+    return float(pred[0])
 
 
 # ---------- TABS ----------
@@ -286,7 +268,6 @@ tab_chart,tab_ai,tab_heat,tab_news = st.tabs([
 with tab_chart:
 
     fig=create_chart(df)
-
     st.plotly_chart(fig,use_container_width=True)
 
 
@@ -298,7 +279,7 @@ with tab_ai:
 
     with col1:
 
-        st.subheader("LSTM Prediction")
+        st.subheader("AI Price Prediction")
 
         lstm_price = lstm_forecast(df)
 
@@ -345,7 +326,7 @@ Give a short outlook.
     st.write(f"""
 Current Price: **${price:.2f}**
 
-LSTM Prediction: **${lstm_price:.2f}**
+AI Prediction: **${lstm_price:.2f}**
 
 Expected Move: **{lstm_price-price:.2f}**
 """)
