@@ -12,7 +12,7 @@ import finnhub
 from openai import OpenAI
 import os
 
-from sklearn.ensemble import RandomForestRegressor
+from xgboost import XGBRegressor
 
 
 # ---------- CONFIG ----------
@@ -127,6 +127,25 @@ def load_data(symbol,period):
     df["Returns"] = df["Close"].pct_change()
 
     df["Volatility"] = df["Returns"].rolling(20).std()*np.sqrt(252)
+    
+    # ----- MACD -----
+
+    ema12 = df["Close"].ewm(span=12, adjust=False).mean()
+    ema26 = df["Close"].ewm(span=26, adjust=False).mean()
+
+    df["MACD"] = ema12 - ema26
+    df["MACD_signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
+
+    # ----- Bollinger Bands -----
+
+    df["BB_std"] = df["Close"].rolling(20).std()
+    df["BB_upper"] = df["MA20"] + 2 * df["BB_std"]
+    df["BB_lower"] = df["MA20"] - 2 * df["BB_std"]
+
+    # ----- Volume Momentum -----
+
+    df["Volume_MA20"] = df["Volume"].rolling(20).mean()
+    df["Volume_momentum"] = df["Volume"] / df["Volume_MA20"]    
 
     return df
 
@@ -229,30 +248,41 @@ def create_chart(df):
 
 # ---------- AI MODEL ----------
 
-def price_forecast(df, window=10):
+def price_forecast(df, window=20):
 
-    prices = df["Close"].values
+    features = ["Close", "MA20", "RSI", "Returns", "Volatility"]
+
+    df = df.dropna()
+
+    data = df[features].values
 
     X = []
     y = []
 
-    for i in range(window, len(prices)):
-        X.append(prices[i-window:i])
-        y.append(prices[i])
+    for i in range(window, len(data)):
+        X.append(data[i-window:i].flatten())
+        y.append(data[i][0])   # Close price
 
     X = np.array(X)
     y = np.array(y)
 
-    model = RandomForestRegressor(n_estimators=100)
+    from xgboost import XGBRegressor
+
+    model = XGBRegressor(
+        n_estimators=300,
+        max_depth=4,
+        learning_rate=0.05,
+        subsample=0.9,
+        colsample_bytree=0.9
+    )
 
     model.fit(X, y)
 
-    last_window = prices[-window:].reshape(1, -1)
+    last_window = data[-window:].flatten().reshape(1, -1)
 
     pred = model.predict(last_window)
 
     return float(pred[0])
-
 
 # ---------- TABS ----------
 
@@ -280,7 +310,7 @@ with tab_ai:
 
     with col1:
 
-        st.subheader("AI Price Prediction")
+        st.subheader("XGBoost model Price Prediction")
 
         pred_price = price_forecast(df)
 
@@ -334,7 +364,7 @@ Give a short outlook.
             st.subheader("AI Trading Signal")
 
             st.write(f"""
-Model Signal: **{model_signal.upper()}**
+XGBoost Model Signal: **{model_signal.upper()}**
 
 LLM Sentiment: **{llm_signal.upper()}**
 
