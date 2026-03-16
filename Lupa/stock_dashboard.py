@@ -39,18 +39,14 @@ st.set_page_config(
 st.markdown("""
 <style>
 
-/* Dark mode only */
-@media (prefers-color-scheme: dark) {
-
-.stApp{
+/* Only apply when Streamlit is in dark theme */
+[data-theme="dark"] .stApp{
 background-color:#0f172a;
 color:white;
 }
 
-section[data-testid="stSidebar"]{
+[data-theme="dark"] section[data-testid="stSidebar"]{
 background-color:#111827;
-}
-
 }
 
 /* Metric styling */
@@ -228,7 +224,7 @@ def create_chart(df):
     ),row=2,col=1)
 
     fig.update_layout(
-    template="plotly_dark",
+
     height=650,
     hovermode="x unified"
     )
@@ -403,7 +399,7 @@ with tab_heat:
 
     fig.update_traces(texttemplate="%{text:.2f}%",textposition="outside")
 
-    fig.update_layout(template="plotly_dark",height=450)
+    fig.update_layout(height=450)
 
     st.plotly_chart(fig,use_container_width=True)
 
