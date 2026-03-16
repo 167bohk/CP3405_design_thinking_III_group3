@@ -1,12 +1,9 @@
-python_version < "3.13"
-
 streamlit
 yfinance
 pandas
 numpy
 plotly
 scikit-learn
-tensorflow==2.15.0
 pillow
 finnhub-python
 openai
