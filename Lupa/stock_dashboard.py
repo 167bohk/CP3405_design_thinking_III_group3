@@ -1,4 +1,3 @@
-
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -11,16 +10,16 @@ from PIL import Image
 import finnhub
 from openai import OpenAI
 import os
-
 from xgboost import XGBRegressor
 
 
 # ---------- CONFIG ----------
 
 FINNHUB_API_KEY = st.secrets["FINNHUB_API_KEY"]
-finnhub_client = finnhub.Client(api_key=FINNHUB_API_KEY)
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+finnhub_client = finnhub.Client(api_key=FINNHUB_API_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 BIG_TECHS = [
 "AAPL","MSFT","NVDA","AMZN",
@@ -65,8 +64,7 @@ with col_logo:
 with col_title:
     st.title("Lupa AI Stock Terminal")
 
-
-# ---------- SIDEBAR STATE ----------
+# ---------- SIDEBAR ----------
 
 if "ticker" not in st.session_state:
     st.session_state.ticker="AAPL"
@@ -74,29 +72,17 @@ if "ticker" not in st.session_state:
 if "bigtech" not in st.session_state:
     st.session_state.bigtech="AAPL"
 
-
 def ticker_changed():
     ticker = st.session_state.ticker.upper()
     if ticker in BIG_TECHS:
         st.session_state.bigtech = ticker
 
-
 def bigtech_changed():
     st.session_state.ticker = st.session_state.bigtech
 
+st.sidebar.text_input("Ticker",key="ticker",on_change=ticker_changed)
 
-st.sidebar.text_input(
-"Ticker",
-key="ticker",
-on_change=ticker_changed
-)
-
-st.sidebar.radio(
-"Big Tech",
-BIG_TECHS,
-key="bigtech",
-on_change=bigtech_changed
-)
+st.sidebar.radio("Big Tech",BIG_TECHS,key="bigtech",on_change=bigtech_changed)
 
 symbol = st.session_state.ticker.upper()
 
@@ -105,7 +91,6 @@ period = st.sidebar.selectbox(
 ["3mo","6mo","1y","2y","5y"],
 index=2
 )
-
 
 # ---------- DATA ----------
 
@@ -127,25 +112,22 @@ def load_data(symbol,period):
     df["Returns"] = df["Close"].pct_change()
 
     df["Volatility"] = df["Returns"].rolling(20).std()*np.sqrt(252)
-    
-    # ----- MACD -----
 
-    ema12 = df["Close"].ewm(span=12, adjust=False).mean()
-    ema26 = df["Close"].ewm(span=26, adjust=False).mean()
+    # MACD
+    ema12 = df["Close"].ewm(span=12).mean()
+    ema26 = df["Close"].ewm(span=26).mean()
 
     df["MACD"] = ema12 - ema26
-    df["MACD_signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
+    df["MACD_signal"] = df["MACD"].ewm(span=9).mean()
 
-    # ----- Bollinger Bands -----
-
+    # Bollinger Bands
     df["BB_std"] = df["Close"].rolling(20).std()
-    df["BB_upper"] = df["MA20"] + 2 * df["BB_std"]
-    df["BB_lower"] = df["MA20"] - 2 * df["BB_std"]
+    df["BB_upper"] = df["MA20"] + 2*df["BB_std"]
+    df["BB_lower"] = df["MA20"] - 2*df["BB_std"]
 
-    # ----- Volume Momentum -----
-
+    # Volume momentum
     df["Volume_MA20"] = df["Volume"].rolling(20).mean()
-    df["Volume_momentum"] = df["Volume"] / df["Volume_MA20"]    
+    df["Volume_momentum"] = df["Volume"]/df["Volume_MA20"]
 
     return df
 
@@ -159,18 +141,18 @@ if df.empty:
 price = df["Close"].iloc[-1]
 ret = df["Returns"].iloc[-1]
 
-
 # ---------- HEADER ----------
 
 st.markdown(f"## 📊 {symbol} Market Overview")
 
 col1,col2,col3,col4 = st.columns(4)
 
+trend="Bullish" if price>df["MA20"].iloc[-1] else "Bearish"
+
 with col1:
     st.metric("Price",f"${price:.2f}",f"{ret:.2%}")
 
 with col2:
-    trend="Bullish" if price>df["MA20"].iloc[-1] else "Bearish"
     st.metric("Trend",trend)
 
 with col3:
@@ -178,7 +160,6 @@ with col3:
 
 with col4:
     st.metric("RSI",f"{df['RSI'].iloc[-1]:.1f}")
-
 
 # ---------- MARKET SENTIMENT ----------
 
@@ -200,7 +181,6 @@ gauge={
 ))
 
 st.plotly_chart(fig_sent,use_container_width=True)
-
 
 # ---------- CHART ----------
 
@@ -237,72 +217,85 @@ def create_chart(df):
     marker_color="rgba(120,160,255,0.3)"
     ),row=2,col=1)
 
-    fig.update_layout(
-
-    height=650,
-    hovermode="x unified"
-    )
+    fig.update_layout(height=650,hovermode="x unified")
 
     return fig
 
-
 # ---------- AI MODEL ----------
 
-def price_forecast(df, window=20):
+@st.cache_resource
+def train_model(X,y):
 
-    features = ["Close", "MA20", "RSI", "Returns", "Volatility"]
+    model = XGBRegressor(
+        n_estimators=120,
+        max_depth=3,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8
+    )
 
+    model.fit(X,y)
+
+    return model
+
+
+def price_forecast(df,window=20):
+
+    df = df.tail(500)
     df = df.dropna()
+
+    features = [
+    "Close","MA20","RSI","Returns","Volatility",
+    "MACD","MACD_signal","BB_upper","BB_lower",
+    "Volume_momentum"
+    ]
 
     data = df[features].values
 
-    X = []
-    y = []
+    X=[]
+    y=[]
 
-    for i in range(window, len(data)):
+    for i in range(window,len(data)):
         X.append(data[i-window:i].flatten())
-        y.append(data[i][0])   # Close price
+        y.append(data[i][0])
 
-    X = np.array(X)
-    y = np.array(y)
+    X=np.array(X)
+    y=np.array(y)
 
-    from xgboost import XGBRegressor
+    model=train_model(X,y)
 
-    model = XGBRegressor(
-        n_estimators=300,
-        max_depth=4,
-        learning_rate=0.05,
-        subsample=0.9,
-        colsample_bytree=0.9
-    )
+    last_window=data[-window:].flatten().reshape(1,-1)
 
-    model.fit(X, y)
-
-    last_window = data[-window:].flatten().reshape(1, -1)
-
-    pred = model.predict(last_window)
+    pred=model.predict(last_window)
 
     return float(pred[0])
+
+# ---------- LLM ----------
+
+@st.cache_data(ttl=600)
+def run_llm(prompt):
+
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role":"user","content":prompt}]
+    )
+
+    return response.choices[0].message.content
 
 # ---------- TABS ----------
 
 tab_chart,tab_ai,tab_heat,tab_news = st.tabs([
-"📊 Chart",
-"🤖 AI Forecast",
-"🌎 Heatmap",
-"📰 News"
+"📊 Chart","🤖 AI Forecast","🌎 Heatmap","📰 News"
 ])
 
-
-# ---------- CHART TAB ----------
+# ---------- CHART ----------
 
 with tab_chart:
 
     fig=create_chart(df)
     st.plotly_chart(fig,use_container_width=True)
 
-
-# ---------- AI TAB ----------
+# ---------- AI ----------
 
 with tab_ai:
 
@@ -310,79 +303,67 @@ with tab_ai:
 
     with col1:
 
-        st.subheader("XGBoost model Price Prediction")
+        st.subheader("XGBoost Prediction")
 
         pred_price = price_forecast(df)
 
-        direction = "Bullish" if pred_price > price else "Bearish"
+        direction = "Bullish" if pred_price>price else "Bearish"
 
-        st.metric(
-        "Predicted Price",
-        f"${pred_price:.2f}",
-        direction
-        )
+        st.metric("Predicted Price",f"${pred_price:.2f}",direction)
 
     with col2:
 
         st.subheader("LLM Analysis")
 
-        trend="Bullish" if price>df["MA20"].iloc[-1] else "Bearish"
-
         prompt=f"""
 You are a professional quantitative analyst.
 
 Stock: {symbol}
-
 Price: {price}
 RSI: {df['RSI'].iloc[-1]:.2f}
 Volatility: {df['Volatility'].iloc[-1]:.2%}
 Trend: {trend}
 
-Give a short outlook.
+Give short outlook.
 """
 
         if st.button("Run LLM Analysis"):
 
-            response = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role":"user","content":prompt}]
-            )
-
-            llm_text = response.choices[0].message.content
+            llm_text = run_llm(prompt)
 
             st.write(llm_text)
 
-            llm_signal = "bullish" if "bullish" in llm_text.lower() else "bearish"
+            llm_signal="bullish" if "bullish" in llm_text.lower() else "bearish"
+            model_signal="bullish" if pred_price>price else "bearish"
+            trend_signal="bullish" if trend=="Bullish" else "bearish"
 
-            model_signal = "bullish" if pred_price > price else "bearish"
+            votes=[llm_signal,model_signal,trend_signal]
 
-            if model_signal == llm_signal:
-                final_signal = "BUY" if model_signal == "bullish" else "SELL"
+            bullish=votes.count("bullish")
+            bearish=votes.count("bearish")
+
+            if bullish>bearish:
+                final_signal="BUY"
+            elif bearish>bullish:
+                final_signal="SELL"
             else:
-                final_signal = "HOLD"
+                final_signal="HOLD"
+
+            confidence=max(bullish,bearish)/3
 
             st.subheader("AI Trading Signal")
 
             st.write(f"""
-XGBoost Model Signal: **{model_signal.upper()}**
+Trend: **{trend_signal.upper()}**
 
-LLM Sentiment: **{llm_signal.upper()}**
+XGBoost: **{model_signal.upper()}**
 
-Final Decision: **{final_signal}**
+LLM: **{llm_signal.upper()}**
+
+Signal: **{final_signal}**
+
+Confidence: **{confidence:.0%}**
 """)
-
-    st.divider()
-
-    st.subheader("AI Comparison")
-
-    st.write(f"""
-Current Price: **${price:.2f}**
-
-AI Prediction: **${pred_price:.2f}**
-
-Expected Move: **{pred_price-price:.2f}**
-""")
-
 
 # ---------- HEATMAP ----------
 
@@ -403,10 +384,7 @@ with tab_heat:
 
             change=(close.iloc[-1]-close.iloc[0])/close.iloc[0]*100
 
-            data.append({
-            "Ticker":t,
-            "Change":float(change)
-            })
+            data.append({"Ticker":t,"Change":float(change)})
 
         except:
             pass
@@ -414,20 +392,15 @@ with tab_heat:
     hdf=pd.DataFrame(data)
 
     fig=px.bar(
-    hdf,
-    x="Ticker",
-    y="Change",
-    color="Change",
-    text="Change",
-    color_continuous_scale="RdYlGn"
+        hdf,x="Ticker",y="Change",
+        color="Change",text="Change",
+        color_continuous_scale="RdYlGn"
     )
 
     fig.update_traces(texttemplate="%{text:.2f}%",textposition="outside")
-
     fig.update_layout(height=450)
 
     st.plotly_chart(fig,use_container_width=True)
-
 
 # ---------- NEWS ----------
 
@@ -443,11 +416,10 @@ with tab_news:
     for n in news[:10]:
 
         st.markdown(f"**[{n['headline']}]({n['url']})**")
-
         st.write(n.get("summary",""))
 
         st.caption(
-        datetime.fromtimestamp(n["datetime"]).strftime("%Y-%m-%d")
+            datetime.fromtimestamp(n["datetime"]).strftime("%Y-%m-%d")
         )
 
         st.divider()
