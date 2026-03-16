@@ -28,25 +28,36 @@ BIG_TECHS = [
 ]
 
 st.set_page_config(
-page_title="Lupa AI Stock Terminal",
-layout="wide",
-page_icon="📈"
+    page_title="Lupa AI Stock Terminal",
+    layout="wide",
+    page_icon="📈",
+    initial_sidebar_state="expanded"
 )
 
 # ---------- STYLE ----------
 
 st.markdown("""
 <style>
+
+/* Dark mode only */
+@media (prefers-color-scheme: dark) {
+
 .stApp{
-background:#0f172a;
+background-color:#0f172a;
 color:white;
 }
+
 section[data-testid="stSidebar"]{
-background:#111827;
+background-color:#111827;
 }
+
+}
+
+/* Metric styling */
 [data-testid="stMetricValue"]{
 font-size:28px;
 }
+
 </style>
 """, unsafe_allow_html=True)
 
