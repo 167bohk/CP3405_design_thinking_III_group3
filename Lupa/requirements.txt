@@ -4,7 +4,7 @@ pandas
 numpy
 plotly
 scikit-learn
-tensorflow
+tensorflow==2.15.0
 pillow
 finnhub-python
 openai
