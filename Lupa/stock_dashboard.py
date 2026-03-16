@@ -187,37 +187,48 @@ st.plotly_chart(fig_sent,use_container_width=True)
 def create_chart(df):
 
     fig = make_subplots(
-    rows=2,
-    cols=1,
-    shared_xaxes=True,
-    vertical_spacing=0.03,
-    row_heights=[0.75,0.25]
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.75,0.25]
     )
 
     fig.add_trace(go.Candlestick(
-    x=df.index,
-    open=df["Open"],
-    high=df["High"],
-    low=df["Low"],
-    close=df["Close"],
-    increasing_line_color="#22c55e",
-    decreasing_line_color="#ef4444"
+        x=df.index,
+        open=df["Open"],
+        high=df["High"],
+        low=df["Low"],
+        close=df["Close"],
+        increasing_line_color="#22c55e",
+        decreasing_line_color="#ef4444"
     ),row=1,col=1)
 
     fig.add_trace(go.Scatter(
-    x=df.index,
-    y=df["MA20"],
-    line=dict(color="#60a5fa",width=2),
-    name="MA20"
+        x=df.index,
+        y=df["MA20"],
+        line=dict(color="#60a5fa",width=2),
+        name="MA20"
     ),row=1,col=1)
 
     fig.add_trace(go.Bar(
-    x=df.index,
-    y=df["Volume"],
-    marker_color="rgba(120,160,255,0.3)"
+        x=df.index,
+        y=df["Volume"],
+        marker_color="rgba(120,160,255,0.3)"
     ),row=2,col=1)
 
-    fig.update_layout(height=650,hovermode="x unified")
+    fig.update_layout(
+        height=650,
+        hovermode="x unified",
+        dragmode="pan"
+    )
+
+    fig.update_layout(
+        xaxis=dict(
+            rangeslider=dict(visible=True),
+            type="date"
+        )
+    )
 
     return fig
 
@@ -309,7 +320,11 @@ tab_chart,tab_ai,tab_almanac,tab_heat,tab_news = st.tabs([
 with tab_chart:
 
     fig=create_chart(df)
-    st.plotly_chart(fig,use_container_width=True)
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"scrollZoom": True}
+    )
 
 # ---------- AI ----------
 
