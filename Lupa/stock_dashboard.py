@@ -239,11 +239,12 @@ def best_six_months():
 def train_model(X,y):
 
     model = XGBRegressor(
-        n_estimators=120,
+        n_estimators=80,
         max_depth=3,
         learning_rate=0.05,
         subsample=0.8,
         colsample_bytree=0.8
+        n_jobs=1
     )
 
     model.fit(X,y)
@@ -253,7 +254,7 @@ def train_model(X,y):
 
 def price_forecast(df,window=20):
 
-    df = df.tail(400)
+    df = df.tail(350)
     df = df.dropna()
 
     features = [
@@ -342,7 +343,7 @@ Trend: {trend}
 Give short outlook.
 """
 
-        if st.button("Run LLM Analysis"):
+        if st.button("Run LLM Analysis", key="llm_button"):
 
             llm_text = run_llm(prompt)
 
@@ -354,9 +355,12 @@ Give short outlook.
 
             # NEW
             best6 = best_six_months()
-            season_signal = "bullish" if best6=="Bullish Season" else "bearish"
+            season_signal = "bullish" if best6 == "Bullish Season" else "neutral"
 
-            votes=[llm_signal,model_signal,trend_signal,season_signal]
+            votes=[llm_signal,model_signal,trend_signal]
+
+            if season_signal != "neutral":
+                votes.append(season_signal)
 
             bullish=votes.count("bullish")
             bearish=votes.count("bearish")
@@ -368,7 +372,7 @@ Give short outlook.
             else:
                 final_signal="HOLD"
 
-            confidence=max(bullish,bearish)/4
+            confidence=max(bullish,bearish)/len(votes)
 
             st.subheader("AI Trading Signal")
 
@@ -457,17 +461,22 @@ with tab_almanac:
 
     spy = yf.download("SPY",period="2y",progress=False)
 
-    jan = spy[spy.index.month==1]
+    jan = spy[spy.index.month == 1]
 
-    if len(jan)>5:
+    if len(jan) > 5:
 
-        jan_return = (jan["Close"].iloc[-1]/jan["Close"].iloc[0])-1
+        close = jan["Close"]
 
-        jan_signal = "Bullish" if jan_return>0 else "Bearish"
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:,0]
+
+        jan_return = float((close.iloc[-1] / close.iloc[0]) - 1)
+
+        jan_signal = "Bullish" if jan_return > 0 else "Bearish"
 
     else:
 
-        jan_signal="Waiting for January"
+        jan_signal = "Waiting for January"
 
     # ---------- First Five Days ----------
 
@@ -475,7 +484,12 @@ with tab_almanac:
 
     if len(jan5)==5:
 
-        jan5_return=(jan5["Close"].iloc[-1]/jan5["Close"].iloc[0])-1
+        close = jan5["Close"]
+
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:,0]
+
+        jan5_return = float((close.iloc[-1]/close.iloc[0]) - 1)
 
         five_signal="Bullish" if jan5_return>0 else "Bearish"
 
