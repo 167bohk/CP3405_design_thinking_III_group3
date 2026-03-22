@@ -382,27 +382,29 @@ def run_llm(prompt):
 
 # ---------- NEWS SENTIMENT PIPELINE ----------
 
-
 @st.cache_data(ttl=1800)
 def classify_sentiment(text):
     prompt = f"""
-You are a financial sentiment classifier.
+You are a financial sentiment scoring model.
 
-Classify this news as:
-bullish / neutral / bearish
+Score the sentiment of this news between -1 and 1.
 
-ONLY return one word.
+Rules:
+-1 = very bearish
+0 = neutral
++1 = very bullish
+
+Return ONLY a number (e.g., -0.7, 0.2, 0.9)
 
 News:
 {text}
 """
-    res = run_llm(prompt).lower()
+    res = run_llm(prompt)
 
-    if "bullish" in res:
-        return 1
-    elif "bearish" in res:
-        return -1
-    else:
+    try:
+        score = float(res.strip())
+        return max(min(score, 1), -1)  # clamp到[-1,1]
+    except:
         return 0
 
 
@@ -446,8 +448,6 @@ def build_sentiment_series(symbol, df):
     return series
 
 
-df["NewsSentiment"] = build_sentiment_series(symbol, df)
-df["NewsSentiment"] = df["NewsSentiment"].rolling(3).mean().fillna(0)
 # ---------- TABS ----------
 
 tab_chart, tab_ai, tab_almanac, tab_heat, tab_news = st.tabs([
@@ -507,7 +507,17 @@ Give short outlook.
             llm_signal = "bullish" if "bullish" in llm_text.lower() else "bearish"
             model_signal = "bullish" if pred_price > price else "bearish"
             trend_signal = "bullish" if trend == "Bullish" else "bearish"
+            
+            # ---------- RUN SENTIMENT ONLY WHEN CLICK ----------
+            
+            df["NewsSentiment"] = build_sentiment_series(symbol, df)
 
+            df["NewsSentiment"] = df["NewsSentiment"].rolling(3).mean().fillna(0)
+            df["SentimentStrength"] = abs(df["NewsSentiment"])
+
+            sentiment_score = df["NewsSentiment"].iloc[-1]
+            sentiment_strength = df["SentimentStrength"].iloc[-1]
+            
             
             best6 = best_six_months()
             season_signal = "bullish" if best6 == "Bullish Season" else "neutral"
@@ -557,7 +567,9 @@ Give short outlook.
             LLM: **{llm_signal.upper()}**
             
             News Sentiment: **{sentiment_score:.2f}**
-
+            
+            Sentiment Strength: **{sentiment_strength:.2f}**
+            
             Seasonality: **{best6}**
 
             Signal: **{final_signal}**
