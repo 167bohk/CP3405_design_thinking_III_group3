@@ -425,7 +425,7 @@ def build_sentiment_series(symbol, df):
 
     data = []
 
-    for n in news[:20]:  # 控制成本
+    for n in news[:10]:  # 控制成本
         text = n.get("headline","") + " " + n.get("summary","")
         score = classify_sentiment(text)
 
@@ -448,7 +448,7 @@ def build_sentiment_series(symbol, df):
     decay = np.exp(-np.linspace(0, 3, len(series)))
     series = series * decay[::-1]
 
-    return series
+    return series, news
 
 
 # ---------- TABS ----------
@@ -569,8 +569,7 @@ Give short outlook.
 
             LLM: **{llm_signal.upper()}**
             
-            News Sentiment: **{sentiment_score:.2f}** (from -1 to 1)
-            
+            News Sentiment: **{sentiment_score:.2f}** (from -1 to 1), News count: **{len(news)}**
             Seasonality: **{best6}**
 
             Signal: **{final_signal}**
