@@ -190,9 +190,6 @@ def load_data(symbol, period):
 
 
 df = load_data(symbol, period)
-df.index = pd.to_datetime(df.index).tz_localize(None)
-
-# ---------- ADD SENTIMENT FEATURE ----------
 
 if df.empty:
     st.error("Ticker not found")
@@ -338,16 +335,13 @@ def train_model(X, y):
 
 
 def price_forecast(df, window=20):
-
     df = df.tail(350)
     df = df.dropna()
-    if "NewsSentiment" not in df.columns:
-        df["NewsSentiment"] = 0
-        
+
     features = [
         "Close", "MA20", "RSI", "Returns", "Volatility",
         "MACD", "MACD_signal", "BB_upper", "BB_lower",
-        "Volume_momentum", "NewsSentiment"
+        "Volume_momentum"
     ]
 
     data = df[features].values
@@ -382,104 +376,6 @@ def run_llm(prompt):
 
     return response.choices[0].message.content
 
-
-# ---------- NEWS SENTIMENT PIPELINE ----------
-
-@st.cache_data(ttl=1800)
-def classify_sentiment(text):
-    prompt = f"""
-You are a financial sentiment scoring model.
-
-Score the sentiment of this news between -1 and 1.
-
-Rules:
--1 = very bearish
-0 = neutral
-+1 = very bullish
-
-Return ONLY a number between -1 and 1.
-
-DO NOT return words.
-DO NOT explain.
-
-Examples:
-0.5
--0.3
-0
-
-News:
-{text}
-"""
-    res = run_llm(prompt)
-
-    try:
-        score = float(res.strip())
-        return max(min(score, 1), -1)  # clamp到[-1,1]
-    except:
-        return 0
-
-
-@st.cache_data(ttl=1800)
-def build_sentiment_series(symbol, df):
-
-    today = datetime.today()
-    last_week = today - timedelta(days=7)
-
-    news = finnhub_client.company_news(
-        symbol,
-        _from=last_week.strftime("%Y-%m-%d"),
-        to=today.strftime("%Y-%m-%d")
-    )
-
-    # ✅ 1. 排序（最新优先）
-    news = sorted(news, key=lambda x: x["datetime"], reverse=True)
-
-    # ✅ 2. 去重（非常关键）
-    seen = set()
-    filtered = []
-
-    for n in news:
-        title = n.get("headline", "")
-        if title not in seen:
-            seen.add(title)
-            filtered.append(n)
-
-    # ✅ 3. 限制数量（核心）
-    news = filtered[:8]
-
-    data = []
-
-    for n in news:
-        text = n.get("headline","") + " " + n.get("summary","")
-        score = classify_sentiment(text)
-
-        # ✅ 4. 过滤弱信号（避免全变0）
-        if abs(score) < 0.15:
-            continue
-
-        date = datetime.fromtimestamp(n["datetime"]).date()
-
-        data.append({"date": date, "score": score})
-
-    if not data:
-        return pd.Series(0, index=df.index)
-
-    sdf = pd.DataFrame(data)
-
-    daily = sdf.groupby("date")["score"].mean()
-    daily.index = pd.to_datetime(daily.index).tz_localize(None)
-
-    # ✅ 保证 df index 一致
-    df.index = pd.to_datetime(df.index).tz_localize(None)
-
-    # ✅ 对齐时间轴
-    series = daily.reindex(df.index, method="ffill").fillna(0)
-
-    # ✅ 5. 更合理的 decay（只衰减最近几天）
-    decay = np.exp(-np.linspace(0, 2, len(series)))
-    series = series * decay[::-1]
-    st.write("News count:", len(news))
-    return series
 
 
 # ---------- TABS ----------
@@ -541,55 +437,27 @@ Give short outlook.
             llm_signal = "bullish" if "bullish" in llm_text.lower() else "bearish"
             model_signal = "bullish" if pred_price > price else "bearish"
             trend_signal = "bullish" if trend == "Bullish" else "bearish"
-            
-            # ---------- RUN SENTIMENT ONLY WHEN CLICK ----------
-            
-            df["NewsSentiment"] = build_sentiment_series(symbol, df)
 
-            df["NewsSentiment"] = df["NewsSentiment"].rolling(3).mean().fillna(0)
-            df["SentimentStrength"] = abs(df["NewsSentiment"])
-
-            sentiment_score = df["NewsSentiment"].iloc[-1]
-            sentiment_strength = df["SentimentStrength"].iloc[-1]
-            
-            
+            # NEW
             best6 = best_six_months()
             season_signal = "bullish" if best6 == "Bullish Season" else "neutral"
 
-            sentiment_score = df["NewsSentiment"].iloc[-1]
+            votes = [llm_signal, model_signal, trend_signal]
 
-            weights = {
-                "llm": 0.25,
-                "model": 0.35,
-                "trend": 0.25,
-                "sentiment": 0.15
-            }
+            if season_signal != "neutral":
+                votes.append(season_signal)
 
-            score = 0
+            bullish = votes.count("bullish")
+            bearish = votes.count("bearish")
 
-            score += weights["llm"] * (1 if llm_signal=="bullish" else -1)
-            score += weights["model"] * (1 if model_signal=="bullish" else -1)
-            score += weights["trend"] * (1 if trend_signal=="bullish" else -1)
-            score += weights["sentiment"] * sentiment_score
-
-            if best6 == "Bullish Season":
-                score += 0.05
-
-            # final decision
-            if score > 0.15:
+            if bullish > bearish:
                 final_signal = "BUY"
-            elif score < -0.15:
+            elif bearish > bullish:
                 final_signal = "SELL"
             else:
                 final_signal = "HOLD"
-                
-            confidence = abs(score)
-            
-            if sentiment_score < -0.8:
-                final_signal = "SELL"
-                confidence = max(confidence, 0.8)
 
-            
+            confidence = max(bullish, bearish) / len(votes)
 
             st.subheader("AI Trading Signal")
 
@@ -599,8 +467,7 @@ Give short outlook.
             XGBoost: **{model_signal.upper()}**
 
             LLM: **{llm_signal.upper()}**
-            
-            News Sentiment: **{sentiment_score:.2f}** (from -1 to 1)
+
             Seasonality: **{best6}**
 
             Signal: **{final_signal}**
