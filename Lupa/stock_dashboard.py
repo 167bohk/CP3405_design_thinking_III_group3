@@ -46,7 +46,7 @@ if dark_mode:
 else:
     bg_style = "#f0f2f6"
     sidebar_bg = "#ffffff"
-    text_color = "#1e293b"
+    text_color = "#111827"
     metric_bg = "#ffffff"
     plotly_template = "plotly_white"
 
@@ -74,8 +74,16 @@ st.markdown(f"""
     border-radius:10px;
 }}
 
+[data-testid="stWidgetLabel"] p {{
+    color: {text_color} !important;
+    font-weight: 600;
+}}
+
+[data-testid="stMetricLabel"] {{ color: {text_color} !important; }}
+[data-testid="stMetricValue"] {{ color: {text_color} !important; }}
+
 h1, h2, h3, h4, h5, p {{
-    color: {text_color};
+    color: {text_color} !important;
 }}
 
 </style>
