@@ -36,23 +36,25 @@ st.set_page_config(
 # [新增] 在侧边栏添加白天/黑夜切换开关
 dark_mode = st.sidebar.toggle("Night Mode", value=True)
 
-# [新增] 根据模式定义颜色变量
+# [新增] 根据模式定义颜色变量，白天模式强制使用纯黑 (#000000) 确保高对比度
 if dark_mode:
     bg_style = "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.05), transparent 60%), radial-gradient(circle at center, #1e293b 0%, #020617 100%)"
     sidebar_bg = "#020617"
     text_color = "white"
     metric_bg = "rgba(255,255,255,0.05)"
     plotly_template = "plotly_dark"
+    grid_color = "rgba(255,255,255,0.1)"
 else:
     bg_style = "#f0f2f6"
     sidebar_bg = "#ffffff"
-    text_color = "#1e293b"
+    text_color = "#000000"  # [修改] 白天模式强制纯黑
     metric_bg = "#ffffff"
     plotly_template = "plotly_white"
+    grid_color = "rgba(0,0,0,0.1)"
 
 # ---------- STYLE ----------
 
-# [修改] 使用 f-string 动态注入颜色变量，并增加强制锁定输入框文字为白色的样式
+# [修改] 使用 f-string 动态注入颜色变量，并增加对按钮、指标数字、输入框的强制样式覆盖
 st.markdown(f"""
 <style>
 
@@ -74,14 +76,31 @@ st.markdown(f"""
     border-radius:10px;
 }}
 
-h1, h2, h3, h4, h5, p {{
-    color: {text_color}!important;
+/* [新增] 强制所有层级的文字、标签颜色，确保在白天模式下可见 */
+h1, h2, h3, h4, h5, p, label, span, div {{
+    color: {text_color} !important;
 }}
 
-/* [新增] 强制 Ticker 输入框和 Period 选择框内的文字颜色保持白色 */
+/* [新增] 专项修复：指标数字 (Metric Value) 颜色 */
+[data-testid="stMetricValue"] div {{
+    color: {text_color} !important;
+}}
+
+/* [新增] 专项修复：按钮内部文字颜色保持白色 (以适配深色按钮背景) */
+.stButton > button p {{
+    color: white !important;
+    font-weight: 700 !important;
+}}
+
+/* [新增] 专项修复：Tab 标签页文字颜色 */
+button[data-baseweb="tab"] div {{
+    color: {text_color} !important;
+}}
+
+/* [新增] 专项修复：侧边栏输入框和下拉框文字颜色保持白色 */
 .stTextInput input, .stSelectbox div[data-baseweb="select"] {{
-    color: white;
-    -webkit-text-fill-color: white;
+    color: white !important;
+    -webkit-text-fill-color: white !important;
 }}
 
 </style>
@@ -206,9 +225,9 @@ sentiment = 50 + ret * 100
 fig_sent = go.Figure(go.Indicator(
     mode="gauge+number",
     value=sentiment,
-    title={'text': "Market Sentiment"},
+    title={'text': "Market Sentiment", 'font': {'color': text_color}},  # [修改] 显式设置标题颜色
     gauge={
-        'axis': {'range': [0, 100]},
+        'axis': {'range': [0, 100], 'tickcolor': text_color, 'tickfont': {'color': text_color}},  # [新增] 设置刻度文字颜色
         'bar': {'color': "#3b82f6"},
         'steps': [
             {'range': [0, 40], 'color': "#ef4444"},
@@ -218,8 +237,9 @@ fig_sent = go.Figure(go.Indicator(
     }
 ))
 
-# [修改] 更新仪表盘图表模板及背景
+# [修改] 更新仪表盘，确保内部数字和字体颜色随主题变化
 fig_sent.update_layout(template=plotly_template, paper_bgcolor='rgba(0,0,0,0)', font={'color': text_color})
+fig_sent.update_traces(number={'font': {'color': text_color}})
 
 st.plotly_chart(fig_sent, use_container_width=True)
 
@@ -264,13 +284,16 @@ def create_chart(df):
         dragmode="pan"
     )
 
-    # [修改] 更新主图表模板及背景
+    # [修改] 更新图表轴标及网格颜色，确保在白天模式下字符可见
     fig.update_layout(
         template=plotly_template,
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
         font={'color': text_color}
     )
+
+    fig.update_xaxes(tickfont=dict(color=text_color), gridcolor=grid_color)  # [新增] 强制 X 轴刻度变色
+    fig.update_yaxes(tickfont=dict(color=text_color), gridcolor=grid_color)  # [新增] 强制 Y 轴刻度变色
 
     fig.update_layout(
         xaxis=dict(
@@ -347,7 +370,7 @@ def price_forecast(df, window=20):
 @st.cache_data(ttl=600)
 def run_llm(prompt):
     response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}]
     )
 
@@ -483,9 +506,12 @@ with tab_heat:
     )
 
     fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
-    # [修改] 更新热力图模板及背景
+    # [修改] 更新轴标及字体，确保热力图在白天模式下可见
     fig.update_layout(height=450, template=plotly_template, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                       font={'color': text_color})
+
+    fig.update_xaxes(tickfont=dict(color=text_color))  # [新增] 强制热力图 X 轴变色
+    fig.update_yaxes(tickfont=dict(color=text_color))  # [新增] 强制热力图 Y 轴变色
 
     st.plotly_chart(fig, use_container_width=True)
 
