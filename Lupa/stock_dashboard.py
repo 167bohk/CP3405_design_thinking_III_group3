@@ -33,25 +33,28 @@ st.set_page_config(
 )
 
 # ---------- THEME SETTING ----------
-
+# [新增] 在侧边栏添加白天/黑夜切换开关
 dark_mode = st.sidebar.toggle("Night Mode", value=True)
 
-
+# [修改] 重新定义颜色变量，白天模式强制使用纯黑文字 (#000000)
 if dark_mode:
     bg_style = "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.05), transparent 60%), radial-gradient(circle at center, #1e293b 0%, #020617 100%)"
     sidebar_bg = "#020617"
-    text_color = "#ffffff"
+    text_color = "white"
     metric_bg = "rgba(255,255,255,0.05)"
     plotly_template = "plotly_dark"
+    grid_color = "rgba(255,255,255,0.1)"
 else:
-    bg_style = "#ffffff"
-    sidebar_bg = "#f8f9fa"
-    text_color = "#000000"
-    metric_bg = "#f0f2f6"
+    bg_style = "#f0f2f6"
+    sidebar_bg = "#ffffff"
+    text_color = "#000000"  # [修改] 白天模式使用纯黑
+    metric_bg = "#ffffff"
     plotly_template = "plotly_white"
+    grid_color = "rgba(0,0,0,0.1)"
 
 # ---------- STYLE ----------
 
+# [修改] 增加针对侧边栏输入框、按钮文字、标签和指标数字的 CSS 强制样式
 st.markdown(f"""
 <style>
 
@@ -73,41 +76,35 @@ st.markdown(f"""
     border-radius:10px;
 }}
 
-h1, h2, h3, h4, h5, p, label, span, div {{
+/* [修改] 强制所有层级的文字、标签颜色，确保在白天模式下可见 */
+h1, h2, h3, h4, h5, p, label, .stMarkdown, [data-testid="stWidgetLabel"] p {{
     color: {text_color} !important;
 }}
 
-[data-testid="stMetricValue"] {{
-    color: {text_color} !important;
-}}
-
-
-.stButton > button p {{
-    color: white !important;
-    font-weight: 600 !important;
-}}
-
-button[data-baseweb="tab"] div {{
-    color: {text_color} !important;
-}}
-
-
-.stTextInput input {{
-    color: {text_color} !important;
-}}
-
-.stTextInput input, .stSelectbox div[data-baseweb="select"], [data-testid="stWidgetLabel"] p {{
+/* [新增] 强制侧边栏输入框和下拉框内的文字颜色 */
+.stTextInput input, .stSelectbox div[data-baseweb="select"] {{
     color: {text_color} !important;
     -webkit-text-fill-color: {text_color} !important;
 }}
 
+/* [新增] 指标数字专项修复 - 确保价格数字可见 */
 [data-testid="stMetricValue"] div {{
+    color: {text_color} !important;
+}}
+
+/* [新增] 按钮文字专项修复 - 保持白色文字以适配深色按钮背景 */
+.stButton > button p {{
+    color: white !important;
+    font-weight: 700 !important;
+}}
+
+/* [新增] Tab 标签页文字颜色修复 */
+button[data-baseweb="tab"] div {{
     color: {text_color} !important;
 }}
 
 </style>
 """, unsafe_allow_html=True)
-
 # ---------- LOGO ----------
 
 logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
@@ -228,9 +225,9 @@ sentiment = 50 + ret * 100
 fig_sent = go.Figure(go.Indicator(
     mode="gauge+number",
     value=sentiment,
-    title={'text': "Market Sentiment"},
+    title={'text': "Market Sentiment", 'font': {'color': text_color}},  # [修改] 显式设置标题字体颜色
     gauge={
-        'axis': {'range': [0, 100]},
+        'axis': {'range': [0, 100], 'tickcolor': text_color, 'tickfont': {'color': text_color}},  # [新增] 设置刻度文字颜色
         'bar': {'color': "#3b82f6"},
         'steps': [
             {'range': [0, 40], 'color': "#ef4444"},
@@ -240,12 +237,8 @@ fig_sent = go.Figure(go.Indicator(
     }
 ))
 
-# [修改] 更新仪表盘，确保内部数字和字体颜色随主题变化
-fig_sent.update_layout(
-    template=plotly_template,
-    paper_bgcolor='rgba(0,0,0,0)',
-    font={'color': text_color}
-)
+# [修改] 显式更新图表中心数字的颜色
+fig_sent.update_layout(template=plotly_template, paper_bgcolor='rgba(0,0,0,0)', font={'color': text_color})
 fig_sent.update_traces(number={'font': {'color': text_color}})
 
 st.plotly_chart(fig_sent, use_container_width=True)
@@ -291,13 +284,16 @@ def create_chart(df):
         dragmode="pan"
     )
 
-    # [修改] 确保图表坐标轴和图例字体随主题变化
+    # [修改] 更新轴标及网格颜色，确保在白天模式下字符可见
     fig.update_layout(
         template=plotly_template,
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
         font={'color': text_color}
     )
+
+    fig.update_xaxes(tickfont=dict(color=text_color), gridcolor=grid_color)  # [新增] 强制 X 轴刻度变色
+    fig.update_yaxes(tickfont=dict(color=text_color), gridcolor=grid_color)  # [新增] 强制 Y 轴刻度变色
 
     fig.update_layout(
         xaxis=dict(
@@ -374,7 +370,7 @@ def price_forecast(df, window=20):
 @st.cache_data(ttl=600)
 def run_llm(prompt):
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}]
     )
 
@@ -510,14 +506,12 @@ with tab_heat:
     )
 
     fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
-    # [修改] 确保热力图字体和背景随主题变化
-    fig.update_layout(
-        height=450,
-        template=plotly_template,
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font={'color': text_color}
-    )
+    # [修改] 更新轴标及字体，确保热力图在白天模式下可见
+    fig.update_layout(height=450, template=plotly_template, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                      font={'color': text_color})
+
+    fig.update_xaxes(tickfont=dict(color=text_color))  # [新增] 强制热力图 X 轴变色
+    fig.update_yaxes(tickfont=dict(color=text_color))  # [新增] 强制热力图 Y 轴变色
 
     st.plotly_chart(fig, use_container_width=True)
 
