@@ -397,7 +397,15 @@ Rules:
 0 = neutral
 +1 = very bullish
 
-Return ONLY a number (e.g., -0.7, 0.2, 0.9)
+Return ONLY a number between -1 and 1.
+
+DO NOT return words.
+DO NOT explain.
+
+Examples:
+0.5
+-0.3
+0
 
 News:
 {text}
@@ -470,7 +478,7 @@ def build_sentiment_series(symbol, df):
     # ✅ 5. 更合理的 decay（只衰减最近几天）
     decay = np.exp(-np.linspace(0, 2, len(series)))
     series = series * decay[::-1]
-
+    st.write("News count:", len(news))
     return series
 
 
