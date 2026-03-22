@@ -298,8 +298,7 @@ def create_chart(df):
         plot_bgcolor='rgba(0,0,0,0)',
         font={'color': text_color}
     )
-    fig.update_xaxes(tickfont=dict(color=text_color), titlefont=dict(color=text_color))
-    fig.update_yaxes(tickfont=dict(color=text_color), titlefont=dict(color=text_color))
+
     fig.update_layout(
         xaxis=dict(
             rangeslider=dict(visible=True),
