@@ -45,7 +45,7 @@ if dark_mode:
     plotly_template = "plotly_dark"
     grid_color = "rgba(255,255,255,0.1)"
 else:
-    bg_style = "#f0f2f6"
+    bg_style = "radial-gradient(circle at 50% 30%, rgba(0,0,0,0.03), transparent 60%), radial-gradient(circle at center, #ffffff 0%, #e5e7eb 100%)"
     sidebar_bg = "#ffffff"
     text_color = "#000000"  # [修改] 白天模式强制纯黑
     metric_bg = "#ffffff"
