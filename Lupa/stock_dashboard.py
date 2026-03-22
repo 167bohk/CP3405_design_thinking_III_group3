@@ -569,9 +569,7 @@ Give short outlook.
 
             LLM: **{llm_signal.upper()}**
             
-            News Sentiment: **{sentiment_score:.2f}**
-            
-            Sentiment Strength: **{sentiment_strength:.2f}**
+            News Sentiment: **{sentiment_score:.2f}** (from -1 to 1)
             
             Seasonality: **{best6}**
 
