@@ -423,11 +423,31 @@ def build_sentiment_series(symbol, df):
         to=today.strftime("%Y-%m-%d")
     )
 
+    # ✅ 1. 排序（最新优先）
+    news = sorted(news, key=lambda x: x["datetime"], reverse=True)
+
+    # ✅ 2. 去重（非常关键）
+    seen = set()
+    filtered = []
+
+    for n in news:
+        title = n.get("headline", "")
+        if title not in seen:
+            seen.add(title)
+            filtered.append(n)
+
+    # ✅ 3. 限制数量（核心）
+    news = filtered[:8]
+
     data = []
 
-    for n in news[:10]:  # 控制成本
+    for n in news:
         text = n.get("headline","") + " " + n.get("summary","")
         score = classify_sentiment(text)
+
+        # ✅ 4. 过滤弱信号（避免全变0）
+        if abs(score) < 0.15:
+            continue
 
         date = datetime.fromtimestamp(n["datetime"]).date()
 
@@ -441,13 +461,16 @@ def build_sentiment_series(symbol, df):
     daily = sdf.groupby("date")["score"].mean()
     daily.index = pd.to_datetime(daily.index).tz_localize(None)
 
-    # 对齐价格时间轴
+    # ✅ 保证 df index 一致
+    df.index = pd.to_datetime(df.index).tz_localize(None)
+
+    # ✅ 对齐时间轴
     series = daily.reindex(df.index, method="ffill").fillna(0)
 
-    # 加 decay（越近越重要）🔥
-    decay = np.exp(-np.linspace(0, 3, len(series)))
+    # ✅ 5. 更合理的 decay（只衰减最近几天）
+    decay = np.exp(-np.linspace(0, 2, len(series)))
     series = series * decay[::-1]
-    st.write("News count:", len(news))
+
     return series
 
 
