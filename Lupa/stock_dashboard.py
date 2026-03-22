@@ -33,26 +33,26 @@ st.set_page_config(
 )
 
 # ---------- THEME SETTING ----------
-# [新增] 在侧边栏添加白天/黑夜切换开关
+# [修改] 在侧边栏添加白天/黑夜切换开关
 dark_mode = st.sidebar.toggle("Night Mode", value=True)
 
-# [新增] 根据模式定义颜色变量
+# [修改] 根据模式定义颜色变量，白天模式强制使用纯黑文字 (#000000) 以解决看不清的问题
 if dark_mode:
     bg_style = "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.05), transparent 60%), radial-gradient(circle at center, #1e293b 0%, #020617 100%)"
     sidebar_bg = "#020617"
-    text_color = "white"
+    text_color = "#ffffff"
     metric_bg = "rgba(255,255,255,0.05)"
     plotly_template = "plotly_dark"
 else:
-    bg_style = "#f0f2f6"
-    sidebar_bg = "#ffffff"
-    text_color = "#111827"
-    metric_bg = "#ffffff"
+    bg_style = "#ffffff"
+    sidebar_bg = "#f8f9fa"
+    text_color = "#000000" # 白天模式使用纯黑
+    metric_bg = "#f0f2f6"
     plotly_template = "plotly_white"
 
 # ---------- STYLE ----------
 
-# [修改] 使用 f-string 动态注入颜色变量
+# [修改] 使用 f-string 动态注入颜色变量，并增加对按钮、指标数字、输入框的强制样式覆盖
 st.markdown(f"""
 <style>
 
@@ -74,20 +74,35 @@ st.markdown(f"""
     border-radius:10px;
 }}
 
-[data-testid="stWidgetLabel"] p {{
+/* [新增] 强制所有层级的文字颜色，包括标题、正文、标签 */
+h1, h2, h3, h4, h5, p, label, span, div {{
     color: {text_color} !important;
-    font-weight: 600;
 }}
 
-[data-testid="stMetricLabel"] {{ color: {text_color} !important; }}
-[data-testid="stMetricValue"] {{ color: {text_color} !important; }}
+/* [新增] 专项修复：指标数字 (Metric Value) 颜色 */
+[data-testid="stMetricValue"] {{
+    color: {text_color} !important;
+}}
 
-h1, h2, h3, h4, h5, p {{
+/* [新增] 专项修复：按钮内部文字颜色 */
+.stButton > button p {{
+    color: {text_color} !important;
+    font-weight: 600 !important;
+}}
+
+/* [新增] 专项修复：Tab 标签页文字颜色 */
+button[data-baseweb="tab"] div {{
+    color: {text_color} !important;
+}}
+
+/* [新增] 专项修复：侧边栏输入框文字颜色 */
+.stTextInput input {{
     color: {text_color} !important;
 }}
 
 </style>
 """, unsafe_allow_html=True)
+
 # ---------- LOGO ----------
 
 logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
@@ -220,8 +235,13 @@ fig_sent = go.Figure(go.Indicator(
     }
 ))
 
-# [修改] 更新仪表盘图表模板及背景
-fig_sent.update_layout(template=plotly_template, paper_bgcolor='rgba(0,0,0,0)', font={'color': text_color})
+# [修改] 更新仪表盘，确保内部数字和字体颜色随主题变化
+fig_sent.update_layout(
+    template=plotly_template,
+    paper_bgcolor='rgba(0,0,0,0)',
+    font={'color': text_color}
+)
+fig_sent.update_traces(number={'font': {'color': text_color}})
 
 st.plotly_chart(fig_sent, use_container_width=True)
 
@@ -266,7 +286,7 @@ def create_chart(df):
         dragmode="pan"
     )
 
-    # [修改] 更新主图表模板及背景
+    # [修改] 确保图表坐标轴和图例字体随主题变化
     fig.update_layout(
         template=plotly_template,
         paper_bgcolor='rgba(0,0,0,0)',
@@ -349,7 +369,7 @@ def price_forecast(df, window=20):
 @st.cache_data(ttl=600)
 def run_llm(prompt):
     response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}]
     )
 
@@ -485,9 +505,14 @@ with tab_heat:
     )
 
     fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
-    # [修改] 更新热力图模板及背景
-    fig.update_layout(height=450, template=plotly_template, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                      font={'color': text_color})
+    # [修改] 确保热力图字体和背景随主题变化
+    fig.update_layout(
+        height=450,
+        template=plotly_template,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font={'color': text_color}
+    )
 
     st.plotly_chart(fig, use_container_width=True)
 
