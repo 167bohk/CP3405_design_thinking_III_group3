@@ -75,7 +75,7 @@ st.markdown(f"""
 }}
 
 h1, h2, h3, h4, h5, p {{
-    color: {text_color};
+    color: {text_color}!important;
 }}
 
 /* [新增] 强制 Ticker 输入框和 Period 选择框内的文字颜色保持白色 */
