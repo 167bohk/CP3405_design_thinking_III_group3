@@ -190,6 +190,7 @@ def load_data(symbol, period):
 
 
 df = load_data(symbol, period)
+df.index = pd.to_datetime(df.index).tz_localize(None)
 
 # ---------- ADD SENTIMENT FEATURE ----------
 
@@ -433,7 +434,7 @@ def build_sentiment_series(symbol, df):
     sdf = pd.DataFrame(data)
 
     daily = sdf.groupby("date")["score"].mean()
-    daily.index = pd.to_datetime(daily.index)
+    daily.index = pd.to_datetime(daily.index).tz_localize(None)
 
     # 对齐价格时间轴
     series = daily.reindex(df.index, method="ffill").fillna(0)
