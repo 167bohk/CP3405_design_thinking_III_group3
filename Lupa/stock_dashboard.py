@@ -338,9 +338,12 @@ def train_model(X, y):
 
 
 def price_forecast(df, window=20):
+
     df = df.tail(350)
     df = df.dropna()
-
+    if "NewsSentiment" not in df.columns:
+        df["NewsSentiment"] = 0
+        
     features = [
         "Close", "MA20", "RSI", "Returns", "Volatility",
         "MACD", "MACD_signal", "BB_upper", "BB_lower",
