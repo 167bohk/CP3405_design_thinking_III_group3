@@ -38,19 +38,32 @@ st.set_page_config(
 st.markdown("""
 <style>
 
+[data-testid="stAppViewContainer"] {
+    background:
+    radial-gradient(circle at 50% 30%, rgba(255,255,255,0.05), transparent 60%),
+    radial-gradient(circle at center, #1e293b 0%, #020617 100%);
+}
+
+[data-testid="stSidebar"] {
+    background-color: #020617;
+}
+
 .block-container{
-padding-top:2rem;
+    padding-top:2rem;
 }
 
 [data-testid="stMetric"]{
-background:rgba(255,255,255,0.04);
-padding:15px;
-border-radius:10px;
+    background:rgba(255,255,255,0.05);
+    padding:15px;
+    border-radius:10px;
+}
+
+h1, h2, h3, h4, h5, p {
+    color: white;
 }
 
 </style>
 """, unsafe_allow_html=True)
-
 # ---------- LOGO ----------
 
 logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
