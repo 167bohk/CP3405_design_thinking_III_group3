@@ -447,8 +447,8 @@ def build_sentiment_series(symbol, df):
     # 加 decay（越近越重要）🔥
     decay = np.exp(-np.linspace(0, 3, len(series)))
     series = series * decay[::-1]
-
-    return series, news
+    st.write("News count:", len(news))
+    return series
 
 
 # ---------- TABS ----------
@@ -569,7 +569,7 @@ Give short outlook.
 
             LLM: **{llm_signal.upper()}**
             
-            News Sentiment: **{sentiment_score:.2f}** (from -1 to 1), News count: **{len(news)}**
+            News Sentiment: **{sentiment_score:.2f}** (from -1 to 1)
             Seasonality: **{best6}**
 
             Signal: **{final_signal}**
