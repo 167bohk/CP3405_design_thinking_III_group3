@@ -299,18 +299,8 @@ def create_chart(df):
     return fig
 
 
-# ---------- SEASONALITY ----------
 
-def best_six_months():
-    month = datetime.now().month
-
-    if month in [11, 12, 1, 2, 3, 4]:
-        return "Bullish Season"
-    else:
-        return "Weak Season"
-
-
-# ---------- AI MODEL ----------
+# ---------- XGBOOST MODEL ----------
 
 @st.cache_resource
 def train_model(X, y):
@@ -432,7 +422,30 @@ else:
     five_signal = "Neutral"
 
 # Best Six Months
+
+def best_six_months():
+    month = datetime.now().month
+
+    if month in [11, 12, 1, 2, 3, 4]:
+        return "Bullish Season"
+    else:
+        return "Weak Season"
+    
 best6 = best_six_months()
+
+# Presidential Cycle
+ 
+year = datetime.now().year
+cycle = year % 4
+
+if cycle == 0:
+    pres = "Election Year"
+elif cycle == 1:
+    pres = "Post Election"
+elif cycle == 2:
+    pres = "Midterm Weakness"
+else:
+    pres = "Pre Election Bullish"
 
 # ---------- NEWS SUMMARY (FOR LLM) ----------
 
@@ -481,23 +494,21 @@ with tab_ai:
         - January Barometer: {jan_signal}
         - First 5 Trading Days: {five_signal}
         - Seasonality (Best 6 Months): {best6}
+        - Presidential Cycle: {pres}
 
         [INSTRUCTIONS]
-        1. Predict SHORT-TERM (1-5 days)
+        1. Predict The price for next trading day (realistic, within ±10%)
         2. Provide:
-        - signal: bullish OR bearish
         - target_price: realistic price (within ±10%)
         - confidence: 0 to 1
         3. Use:
         - technical indicators
         - news sentiment
-        - seasonality signals (low weight)
+        - Almanac Signals: (low weight)
         4. Be decisive
 
         [OUTPUT FORMAT - JSON ONLY]
-        {{
-        "signal": "bullish",
-        "target_price": 210.5,
+        {{"target_price": 210.5,
         "confidence": 0.72,
         "reason": "max 10 sentences"
         }}
@@ -663,24 +674,5 @@ with tab_almanac:
     st.metric("First Five Days", five_signal)
     st.metric("Best Six Months", best6)
 
-    # ---------- Presidential Cycle ----------
-
-    year = datetime.now().year
-
-    cycle = (year - 2024) % 4
-
-    if cycle == 0:
-        pres = "Election Year"
-
-    elif cycle == 1:
-        pres = "Post Election"
-
-    elif cycle == 2:
-        pres = "Midterm Weakness"
-
-    else:
-        pres = "Pre Election Bullish"
-
     st.subheader("Presidential Cycle")
-
     st.info(pres)
