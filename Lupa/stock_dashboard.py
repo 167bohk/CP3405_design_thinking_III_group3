@@ -389,8 +389,32 @@ with tab_chart:
         use_container_width=True,
         config={"scrollZoom": True}
     )
+# ---------- NEWS DATA (GLOBAL) ----------
 
+@st.cache_data(ttl=600)
+def get_news(symbol):
+    today = datetime.today().strftime("%Y-%m-%d")
+    last_week = (datetime.today() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+    try:
+        return finnhub_client.company_news(symbol, _from=last_week, to=today)
+    except:
+        return []
+
+news = get_news(symbol)
+
+# ---------- NEWS SUMMARY (FOR LLM) ----------
+
+news_summary = " | ".join(
+    [n.get("headline", "")[:120] for n in news[:5] if n.get("headline")]
+)
+
+if not news_summary:
+    news_summary = "No significant recent news."
+    
 # ---------- AI ----------
+
+
 
 with tab_ai:
     col1, col2 = st.columns(2)
@@ -409,10 +433,8 @@ with tab_ai:
 
         st.subheader("LLM Analysis")
 
-        prompt = prompt = f"""
+        prompt = f"""
         You are a professional quantitative hedge fund analyst.
-
-        Analyze the stock and return a STRICT decision.
 
         [DATA]
         Stock: {symbol}
@@ -421,18 +443,19 @@ with tab_ai:
         Volatility: {df['Volatility'].iloc[-1]:.2%}
         Trend (MA20): {trend}
 
-        Recent News Sentiment: {sentiment:.1f} / 100
+        Recent News Headlines:
+        {news_summary}
 
         [INSTRUCTIONS]
-        1. Decide the SHORT-TERM direction (1-5 days): ONLY "bullish" OR "bearish"
-        2. Use:
-        - Technicals (RSI, trend, volatility)
-        - News sentiment (IMPORTANT)
-        3. No uncertainty, no "maybe", no "neutral"
+        1. Predict SHORT-TERM direction (1-5 days): ONLY "bullish" OR "bearish"
+        2. Combine:
+        - Technical indicators
+        - News sentiment from headlines
+        3. Be decisive. No uncertainty.
 
         [OUTPUT FORMAT]
         Signal: bullish OR bearish
-        Reason: <max 10 concise sentences>
+        Reason: <max 2 sentences>
         """
 
         if st.button("Run LLM Analysis", key="llm_button"):
@@ -441,7 +464,7 @@ with tab_ai:
 
             st.write(llm_text)
 
-            llm_signal = "bullish" if "bullish" in llm_text.lower() else "bearish"
+            llm_signal = "bullish" if "signal: bullish" in llm_text.lower() else "bearish"
             model_signal = "bullish" if pred_price > price else "bearish"
             trend_signal = "bullish" if trend == "Bullish" else "bearish"
 
@@ -540,23 +563,16 @@ with tab_heat:
 
 # ---------- NEWS ----------
 
-with tab_news:
-    st.subheader(f"{symbol} News")
+for n in news[:10]:
+    headline = n.get("headline", "No title")
+    url = n.get("url", "#")
+    summary = n.get("summary", "")
+    date = datetime.fromtimestamp(n.get("datetime", 0)).strftime("%Y-%m-%d")
 
-    today = datetime.today().strftime("%Y-%m-%d")
-    last_week = (datetime.today() - timedelta(days=7)).strftime("%Y-%m-%d")
-
-    news = finnhub_client.company_news(symbol, _from=last_week, to=today)
-
-    for n in news[:10]:
-        st.markdown(f"**[{n['headline']}]({n['url']})**")
-        st.write(n.get("summary", ""))
-
-        st.caption(
-            datetime.fromtimestamp(n["datetime"]).strftime("%Y-%m-%d")
-        )
-
-        st.divider()
+    st.markdown(f"**[{headline}]({url})**")
+    st.write(summary)
+    st.caption(date)
+    st.divider()
 
 # ---------- ALMANAC ----------
 
