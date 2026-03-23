@@ -101,6 +101,14 @@ button[data-baseweb="tab"] div {{
 
 </style>
 """, unsafe_allow_html=True)
+
+
+def get_signal_style(value, reference):
+    if value > reference:
+        return "↑ Bullish", "#22c55e"
+    else:
+        return "↓ Bearish", "#ef4444"
+    
 # ---------- LOGO ----------
 
 logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
@@ -490,9 +498,21 @@ with tab_ai:
 
         pred_price = price_forecast(df)
 
-        direction = "Bullish" if pred_price > price else "Bearish"
+        signal_text, signal_color = get_signal_style(pred_price, price)
 
-        st.metric("Predicted Price", f"${pred_price:.2f}", direction)
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.05);
+            padding: 20px;
+            border-radius: 15px;
+        ">
+            <p style="color:gray;">Predicted Price</p>
+            <h2>${pred_price:.2f}</h2>
+            <span style="color:{signal_color}; font-weight:600;">
+                {signal_text}
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
 
     with col2:
 
@@ -608,6 +628,7 @@ with tab_ai:
         # ---------- SIGNAL ----------
         signal_text = "BUY" if ensemble_price > price else "SELL"
         signal_color = "#22c55e" if signal_text == "BUY" else "#ef4444"
+        arrow = "↑" if signal_text == "BUY" else "↓"
 
         st.markdown(f"""
         <div style="
@@ -617,7 +638,7 @@ with tab_ai:
             text-align: center;
             margin-bottom:10px;
         ">
-            <h2 style="color:{signal_color};">{signal_text}</h2>
+            <h2 style="color:{signal_color};">{arrow} {signal_text}</h2>
             <p style="color:gray;">Confidence: {llm_conf:.0%}</p>
         </div>
         """, unsafe_allow_html=True)
@@ -628,6 +649,9 @@ with tab_ai:
             ("LLM Price", llm_price),
             ("XGBoost Price", pred_price)
         ]:
+
+            signal_text, signal_color = get_signal_style(value, price)
+
             st.markdown(f"""
             <div style="
                 background: rgba(255,255,255,0.05);
@@ -637,6 +661,9 @@ with tab_ai:
             ">
                 <p style="color:gray;">{title}</p>
                 <h2>${value:.2f}</h2>
+                <span style="color:{signal_color}; font-weight:600;">
+                    {signal_text}
+                </span>
             </div>
             """, unsafe_allow_html=True)
            
