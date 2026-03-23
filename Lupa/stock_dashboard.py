@@ -59,6 +59,10 @@ else:
 st.markdown(f"""
 <style>
 
+body {{
+    color: {text_color};
+}}
+
 [data-testid="stAppViewContainer"] {{
     background: {bg_style} !important;
 }}
@@ -659,7 +663,7 @@ with tab_ai:
                 border-radius: 15px;
                 margin-top:10px;
             ">
-                <p style="color:gray;">{title}</p>
+                <p style="opacity:0.6;">{title}</p>
                 <h2>${value:.2f}</h2>
                 <span style="color:{signal_color}; font-weight:600;">
                     {signal_text}
