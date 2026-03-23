@@ -347,14 +347,22 @@ def price_forecast(df, window=20):
     return float(model.predict(last_window)[0])
 
 
+
 def build_llm_prompt(symbol, price, trend, df, news_summary, almanac):
+    
+    latest_date = df.index[-1].date()
+    next_date = get_next_trading_day(df.index[-1]).date()
+    
     return f"""
     You are a professional quantitative hedge fund analyst.
 
     [DATA]
     Stock: {symbol}
-    Timestamp: {datetime.now()}
-    Current Price: {price}
+    Latest trading date: {latest_date}
+    Current Close Price: {price}
+
+    Target prediction date: {next_date} (next trading day close)
+
     RSI: {df['RSI'].iloc[-1]:.2f}
     Volatility: {df['Volatility'].iloc[-1]:.2%}
     Trend (MA20): {trend}
@@ -362,22 +370,35 @@ def build_llm_prompt(symbol, price, trend, df, news_summary, almanac):
     Recent News Headlines:
     {news_summary}
 
-    Almanac Signals:
-    - January Barometer: {almanac["jan_signal"]}
-    - First 5 Trading Days: {almanac["five_signal"]}
-    - Seasonality (Best 6 Months): {almanac["best6"]}
-    - Presidential Cycle: {almanac["pres"]}
+    Almanac and seasonality signals (weak context only):
+    - January Barometer: {almanac["jan_signal"]} (January direction signal)
+    - First 5 Trading Days: {almanac["five_signal"]} (early-year momentum signal)
+    - Best 6 Months: {almanac["best6"]} (seasonal strength signal)
+    - Presidential Cycle: {almanac["pres"]} (election-cycle context)
 
     [INSTRUCTIONS]
-    1. Predict the price for next trading day (realistic, within +/-10%)
+
+    1. Predict the CLOSE price for the next trading day (T+1).
+
+    - Latest trading date: {latest_date}
+    - Target prediction date: {next_date}
+    - target_price MUST be the closing price of the target date
+
     2. Provide:
-    - target_price: realistic price (within +/-10%)
+    - target_price: realistic closing price (within +/-10%)
     - confidence: 0 to 1
+
     3. Use:
     - technical indicators
     - news sentiment
-    - Almanac Signals: low weight
-    4. Be decisive
+    - almanac/seasonality only as weak supporting context
+
+    4. Rules:
+    - Do NOT predict intraday high/low
+    - Do NOT output a price range
+    - Output ONE single closing price
+
+    5. Be decisive
 
     [OUTPUT FORMAT - JSON ONLY]
     {{
