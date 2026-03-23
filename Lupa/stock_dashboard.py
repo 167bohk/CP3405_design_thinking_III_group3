@@ -958,6 +958,11 @@ with tab_ai:
         ]:
             signal_text, signal_color = get_signal_style(value, price)
             extra_text = None
+            if title == "Ensemble Price":
+                extra_text = (
+                    f'Weighted blend: XGBoost {(1 - forecast_result["llm_conf"]):.0%} '
+                    f'+ LLM {forecast_result["llm_conf"]:.0%}'
+                )
             if title == "LLM Price":
                 extra_text = f'Confidence: {forecast_result["llm_conf"]:.0%}'
             render_value_card(title, value, signal_text, signal_color, theme, extra_text=extra_text)
