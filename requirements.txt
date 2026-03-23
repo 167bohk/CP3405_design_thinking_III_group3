@@ -3,8 +3,9 @@ yfinance
 pandas
 numpy
 plotly
-scikit-learn
-pillow
+Pillow
 finnhub-python
 openai
 xgboost
+transformers
+torch

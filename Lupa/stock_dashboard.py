@@ -14,6 +14,14 @@ from PIL import Image
 from plotly.subplots import make_subplots
 from xgboost import XGBRegressor
 
+try:
+    import torch
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+except ImportError:
+    torch = None
+    AutoModelForSequenceClassification = None
+    AutoTokenizer = None
+
 
 # ---------- App Setup: page metadata, API clients, shared constants ----------
 
@@ -222,6 +230,10 @@ def coerce_series(values):
     return values
 
 
+def clamp(value, lower, upper):
+    return max(lower, min(upper, value))
+
+
 # ---------- Data Layer: market history, news, and seasonality inputs ----------
 
 @st.cache_data
@@ -316,6 +328,97 @@ def get_almanac_signals():
     }
 
 
+@st.cache_resource
+def load_finbert():
+    if torch is None or AutoTokenizer is None or AutoModelForSequenceClassification is None:
+        return None, None
+
+    model_name = "ProsusAI/finbert"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name)
+    model.eval()
+    return tokenizer, model
+
+
+def score_text_with_finbert(text, tokenizer, model):
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=256)
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+        probabilities = torch.softmax(outputs.logits, dim=1)[0].tolist()
+
+    labels = ["positive", "negative", "neutral"]
+    scores = dict(zip(labels, probabilities))
+    compound = scores["positive"] - scores["negative"]
+
+    return {
+        "label": max(scores, key=scores.get),
+        "scores": scores,
+        "compound": compound,
+    }
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def score_news_with_finbert(headlines):
+    tokenizer, model = load_finbert()
+    if tokenizer is None or model is None:
+        return []
+
+    scored_items = []
+    for headline in headlines:
+        stripped = headline.strip()
+        if not stripped:
+            continue
+
+        sentiment = score_text_with_finbert(stripped, tokenizer, model)
+        scored_items.append(
+            {
+                "headline": stripped,
+                "label": sentiment["label"],
+                "compound": sentiment["compound"],
+                "scores": sentiment["scores"],
+            }
+        )
+
+    return scored_items
+
+
+def calculate_technical_sentiment(df):
+    price = df["Close"].iloc[-1]
+    ma20 = df["MA20"].iloc[-1]
+    rsi = df["RSI"].iloc[-1]
+    macd = df["MACD"].iloc[-1]
+    macd_signal = df["MACD_signal"].iloc[-1]
+    ret_5d = df["Close"].pct_change(5).iloc[-1]
+    volume_momentum = df["Volume_momentum"].iloc[-1]
+
+    score = 50.0
+    score += 10 if price > ma20 else -10
+    score += 10 if rsi > 60 else -10 if rsi < 40 else 0
+    score += 10 if macd > macd_signal else -10
+    score += clamp(ret_5d * 100, -10, 10) if pd.notna(ret_5d) else 0
+    score += 5 if volume_momentum > 1.1 else -5 if volume_momentum < 0.9 else 0
+
+    return clamp(score, 0, 100)
+
+
+def aggregate_news_sentiment(scored_news):
+    if not scored_news:
+        return 50.0
+
+    average_compound = sum(item["compound"] for item in scored_news) / len(scored_news)
+    return clamp((average_compound + 1) * 50, 0, 100)
+
+
+def build_news_sentiment_summary(scored_news):
+    if not scored_news:
+        return "FinBERT unavailable; using headlines without structured sentiment score."
+
+    average_compound = sum(item["compound"] for item in scored_news) / len(scored_news)
+    overall_label = "Positive" if average_compound > 0.1 else "Negative" if average_compound < -0.1 else "Neutral"
+    return f"{overall_label} ({average_compound:+.2f} compound from recent headlines)"
+
+
 # ---------- Forecasting: XGBoost model, LLM prompt, and ensemble output ----------
 
 def train_model(X, y):
@@ -366,7 +469,7 @@ def price_forecast(df, window=20):
 
 
 
-def build_llm_prompt(symbol, price, trend, df, news_summary, almanac):
+def build_llm_prompt(symbol, price, trend, df, news_summary, news_sentiment_summary, almanac):
     
     latest_date = df.index[-1].date()
     next_date = get_next_trading_day(df.index[-1]).date()
@@ -387,6 +490,9 @@ def build_llm_prompt(symbol, price, trend, df, news_summary, almanac):
 
     Recent News Headlines:
     {news_summary}
+
+    News Sentiment:
+    {news_sentiment_summary}
 
     Almanac and seasonality signals (weak context only):
     - January Barometer: {almanac["jan_signal"]} (January direction signal)
@@ -631,14 +737,22 @@ def render_signal_card(forecast_result):
     )
 
 
-def render_news_tab(symbol, news_items):
+def render_news_tab(symbol, news_items, scored_news):
     st.subheader(f"{symbol} News")
+
+    scored_lookup = {item["headline"]: item for item in scored_news}
+
     for news_item in news_items[:10]:
         headline = news_item.get("headline", "No title")
         url = news_item.get("url", "#")
         summary = news_item.get("summary", "")
         date = datetime.fromtimestamp(news_item.get("datetime", 0)).strftime("%Y-%m-%d")
         st.markdown(f"**[{headline}]({url})**")
+        if headline in scored_lookup:
+            sentiment = scored_lookup[headline]
+            st.caption(
+                f'FinBERT: {sentiment["label"].title()} | compound {sentiment["compound"]:+.2f}'
+            )
         st.write(summary)
         st.caption(date)
         st.divider()
@@ -700,11 +814,15 @@ if df.empty:
 
 news = get_news(symbol)
 almanac = get_almanac_signals()
+headline_list = [item.get("headline", "") for item in news[:10] if item.get("headline")]
+scored_news = score_news_with_finbert(headline_list)
 
 price = df["Close"].iloc[-1]
 ret = df["Returns"].iloc[-1]
 trend = "Bullish" if price > df["MA20"].iloc[-1] else "Bearish"
-sentiment = 50 + ret * 100
+technical_sentiment = calculate_technical_sentiment(df)
+news_sentiment = aggregate_news_sentiment(scored_news)
+sentiment = 0.7 * technical_sentiment + 0.3 * news_sentiment
 pred_price = price_forecast(df)
 
 news_summary = " | ".join(
@@ -714,6 +832,8 @@ news_summary = " | ".join(
 )
 if not news_summary:
     news_summary = "No significant recent news."
+
+news_sentiment_summary = build_news_sentiment_summary(scored_news)
 
 st.markdown(f"## {symbol} Market Overview")
 
@@ -727,7 +847,9 @@ with metric_col3:
 with metric_col4:
     st.metric("RSI", f"{df['RSI'].iloc[-1]:.1f}")
 
-st.plotly_chart(build_sentiment_gauge(sentiment, theme), use_container_width=True)
+sentiment_left, sentiment_center, sentiment_right = st.columns([1, 2, 1])
+with sentiment_center:
+    st.plotly_chart(build_sentiment_gauge(sentiment, theme), use_container_width=True)
 
 tab_chart, tab_ai, tab_almanac, tab_heat, tab_news = st.tabs(
     ["Chart", "AI Forecast", "Almanac", "Heatmap", "News"]
@@ -747,7 +869,15 @@ with tab_ai:
         st.subheader("XGBoost Prediction")
         render_prediction_card(pred_price, price, theme)
 
-    llm_prompt = build_llm_prompt(symbol, price, trend, df, news_summary, almanac)
+    llm_prompt = build_llm_prompt(
+        symbol,
+        price,
+        trend,
+        df,
+        news_summary,
+        news_sentiment_summary,
+        almanac,
+    )
     run_llm_clicked = False
 
     with right_col:
@@ -812,7 +942,7 @@ with tab_heat:
         st.info("Heatmap data is temporarily unavailable.")
 
 with tab_news:
-    render_news_tab(symbol, news)
+    render_news_tab(symbol, news, scored_news)
 
 with tab_almanac:
     render_almanac_tab(almanac)
