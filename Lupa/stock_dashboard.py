@@ -38,6 +38,7 @@ st.set_page_config(
 dark_mode = st.sidebar.toggle("Night Mode", value=True)
 
 secondary_text = "rgba(255,255,255,0.7)" if dark_mode else "rgba(0,0,0,0.6)"
+card_bg = "rgba(255,255,255,0.05)" if dark_mode else "rgba(0,0,0,0.05)"
 
 if dark_mode:
     bg_style = "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.05), transparent 60%), radial-gradient(circle at center, #1e293b 0%, #020617 100%)"
@@ -503,7 +504,7 @@ with tab_ai:
 
         st.markdown(f"""
         <div style="
-            background: rgba(255,255,255,0.05);
+            background: {card_bg};
             padding: 20px;
             border-radius: 15px;
         ">
@@ -614,7 +615,7 @@ with tab_ai:
 
         st.markdown(f"""
         <div style="
-            background: rgba(255,255,255,0.04);
+            background: {card_bg};
             padding: 15px;
             border-radius: 10px;
             border: 1px solid rgba(255,255,255,0.08);
@@ -633,7 +634,7 @@ with tab_ai:
 
         st.markdown(f"""
         <div style="
-            background: rgba(255,255,255,0.05);
+            background: {card_bg};
             padding: 25px;
             border-radius: 15px;
             text-align: center;
@@ -655,7 +656,7 @@ with tab_ai:
 
             st.markdown(f"""
             <div style="
-                background: rgba(255,255,255,0.05);
+                background: {card_bg};
                 padding: 20px;
                 border-radius: 15px;
                 margin-top:10px;
