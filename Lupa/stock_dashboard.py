@@ -503,57 +503,96 @@ with tab_ai:
         }}
         """
 
-        if st.button("Run LLM Analysis", key="llm_button"):
+    # ---------- BUTTON ----------
+    if st.button("Run LLM Analysis", key="llm_button"):
 
-            llm_text = run_llm(prompt)
+        llm_text = run_llm(prompt)
 
-            try:
-                llm_data = json.loads(llm_text)
-                
-                llm_reason = llm_data.get("reason", "")[:200]
-                llm_signal = llm_data.get("signal", "bearish")
-                llm_price = float(llm_data.get("target_price", price))
-                llm_conf = float(llm_data.get("confidence", 0.5))
+        try:
+            llm_data = json.loads(llm_text)
 
-            except:
-                llm_signal = "bullish" if pred_price > price else "bearish"
-                llm_price = price
-                llm_conf = 0.5
-                
-                
-            model_signal = "bullish" if pred_price > price else "bearish"
-            trend_signal = "bullish" if trend == "Bullish" else "bearish"
+            llm_reason = llm_data.get("reason", "")[:200]
+            llm_price = float(llm_data.get("target_price", price))
+            llm_conf = float(llm_data.get("confidence", 0.5))
 
-            best6 = best_six_months()
-            season_signal = "bullish" if best6 == "Bullish Season" else "neutral"
+        except:
+            llm_reason = "No analysis available"
+            llm_price = price
+            llm_conf = 0.5
 
-            # ---------- ensembled price ----------
-            
-            llm_conf = min(max(llm_conf, 0.2), 0.8)
+        # ---------- ENSEMBLE ----------
+        llm_conf = min(max(llm_conf, 0.2), 0.8)
 
-            ensemble_price = (
-                pred_price * (1 - llm_conf) +
-                llm_price * llm_conf
-            )
+        ensemble_price = (
+            pred_price * (1 - llm_conf) +
+            llm_price * llm_conf
+        )
 
+        # ✅ 存状态（关键）
+        st.session_state.ensemble_price = ensemble_price
+        st.session_state.llm_price = llm_price
+        st.session_state.pred_price = pred_price
+        st.session_state.llm_reason = llm_reason
+        st.session_state.llm_conf = llm_conf
 
-            st.subheader("AI Trading Signal")
+    # ---------- UI（稳定渲染） ----------
+    if "ensemble_price" in st.session_state:
 
-            signal_color = "#22c55e" if ensemble_price > price else "#ef4444"
-            signal_text = "BUY" if ensemble_price > price else "SELL"
+        ensemble_price = st.session_state.ensemble_price
+        llm_price = st.session_state.llm_price
+        pred_price = st.session_state.pred_price
+        llm_reason = st.session_state.llm_reason
+        llm_conf = st.session_state.llm_conf
 
+        # ---------- REASON ----------
+        st.markdown("### 🧠 LLM Analysis")
+
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.04);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.08);
+            font-size: 15px;
+            line-height: 1.6;
+            margin-bottom:10px;
+        ">
+        {llm_reason}
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ---------- SIGNAL ----------
+        signal_text = "BUY" if ensemble_price > price else "SELL"
+        signal_color = "#22c55e" if signal_text == "BUY" else "#ef4444"
+
+        st.markdown(f"""
+        <div style="
+            background: rgba(255,255,255,0.05);
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            margin-bottom:10px;
+        ">
+            <h2 style="color:{signal_color};">{signal_text}</h2>
+            <p style="color:gray;">Confidence: {llm_conf:.0%}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ---------- VERTICAL CARDS ----------
+        for title, value in [
+            ("Ensemble Price", ensemble_price),
+            ("LLM Price", llm_price),
+            ("XGBoost Price", pred_price)
+        ]:
             st.markdown(f"""
             <div style="
                 background: rgba(255,255,255,0.05);
-                padding: 25px;
+                padding: 20px;
                 border-radius: 15px;
-                border: 1px solid rgba(255,255,255,0.1);
-                text-align: center;
+                margin-top:10px;
             ">
-                <h2 style="color:{signal_color}; margin-bottom:10px;">
-                    {signal_text}
-                </h2>
-                
+                <p style="color:gray;">{title}</p>
+                <h2>${value:.2f}</h2>
             </div>
             """, unsafe_allow_html=True)
            
