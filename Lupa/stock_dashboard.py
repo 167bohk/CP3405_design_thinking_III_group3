@@ -37,8 +37,6 @@ st.set_page_config(
 
 dark_mode = st.sidebar.toggle("Night Mode", value=True)
 
-secondary_text = "rgba(255,255,255,0.7)" if dark_mode else "rgba(0,0,0,0.6)"
-card_bg = "rgba(255,255,255,0.05)" if dark_mode else "rgba(0,0,0,0.05)"
 
 if dark_mode:
     bg_style = "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.05), transparent 60%), radial-gradient(circle at center, #1e293b 0%, #020617 100%)"
@@ -57,14 +55,9 @@ else:
 
 # ---------- STYLE ----------
 
-text_color = "white" if dark_mode else "black"
 
 st.markdown(f"""
 <style>
-
-body {{
-    color: {text_color};
-}}
 
 [data-testid="stAppViewContainer"] {{
     background: {bg_style} !important;
@@ -84,6 +77,10 @@ body {{
     border-radius:10px;
 }}
 
+h1, h2, h3, h4, h5, p, label, span, div {{
+    color: {text_color} !important;
+}}
+
 [data-testid="stMetricValue"] div {{
     color: {text_color} !important;
 }}
@@ -98,9 +95,10 @@ button[data-baseweb="tab"] div {{
 }}
 
 .stTextInput input, .stSelectbox div[data-baseweb="select"] {{
-    color: {text_color} !important;
-    -webkit-text-fill-color: {text_color} !important;
+    color: white !important;
+    -webkit-text-fill-color: white !important;
 }}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -504,11 +502,11 @@ with tab_ai:
 
         st.markdown(f"""
         <div style="
-            background: {card_bg};
+            background: rgba(255,255,255,0.05);
             padding: 20px;
             border-radius: 15px;
         ">
-            <p style="color:{secondary_text};">Predicted Price</p>
+            <p style="color:gray;">Predicted Price</p>
             <h2>${pred_price:.2f}</h2>
             <span style="color:{signal_color}; font-weight:600;">
                 {signal_text}
@@ -615,7 +613,7 @@ with tab_ai:
 
         st.markdown(f"""
         <div style="
-            background: {card_bg};
+            background: rgba(255,255,255,0.04);
             padding: 15px;
             border-radius: 10px;
             border: 1px solid rgba(255,255,255,0.08);
@@ -634,14 +632,14 @@ with tab_ai:
 
         st.markdown(f"""
         <div style="
-            background: {card_bg};
+            background: rgba(255,255,255,0.05);
             padding: 25px;
             border-radius: 15px;
             text-align: center;
             margin-bottom:10px;
         ">
             <h2 style="color:{signal_color};">{arrow} {signal_text}</h2>
-            <p style="color:{secondary_text};">Confidence: {llm_conf:.0%}</p>
+            <p style="color:gray;">Confidence: {llm_conf:.0%}</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -656,12 +654,12 @@ with tab_ai:
 
             st.markdown(f"""
             <div style="
-                background: {card_bg};
+                background: rgba(255,255,255,0.05);
                 padding: 20px;
                 border-radius: 15px;
                 margin-top:10px;
             ">
-                <p style="color:{secondary_text};">{title}</p>
+                <p style="color:gray;">{title}</p>
                 <h2>${value:.2f}</h2>
                 <span style="color:{signal_color}; font-weight:600;">
                     {signal_text}
