@@ -499,7 +499,7 @@ with tab_ai:
         "signal": "bullish",
         "target_price": 210.5,
         "confidence": 0.72,
-        "reason": "max 2 sentences"
+        "reason": "max 10 sentences"
         }}
         """
 
