@@ -135,6 +135,12 @@ button[data-baseweb="tab"] div {{
     line-height: 1.2;
 }}
 
+.signal-card-meta {{
+    margin-top: 10px;
+    font-size: 1rem;
+    color: {text_color};
+}}
+
 .signal-buy {{
     color: #22c55e !important;
 }}
@@ -153,6 +159,15 @@ def get_signal_style(value, reference):
     else:
         return "↓ Bearish", "#ef4444"
     
+def get_next_trading_day(base_date):
+    next_day = base_date + timedelta(days=1)
+
+    while next_day.weekday() >= 5:
+        next_day += timedelta(days=1)
+
+    return next_day
+
+
 # ---------- LOGO ----------
 
 logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
@@ -679,12 +694,19 @@ with tab_ai:
         signal_class = "signal-buy" if signal_text == "BUY" else "signal-sell"
         arrow = "↑" if signal_text == "BUY" else "↓"
 
+        arrow = "↑" if signal_text == "BUY" else "↓"
+        predicted_change_pct = ((ensemble_price - price) / price) * 100
+        predicted_date = get_next_trading_day(datetime.now()).strftime("%Y-%m-%d")
+
         st.markdown(f"""
         <div class="signal-card" style="
             padding: 25px;
             margin-bottom:10px;
         ">
-            <div class="signal-card-title {signal_class}">{arrow} {signal_text}</div>
+            <div class="signal-card-title {signal_class}">{"\u2191" if signal_text == "BUY" else "\u2193"} {signal_text}</div>
+            <div class="signal-card-meta">
+                Forecast for {predicted_date} | {predicted_change_pct:+.2f}% vs current
+            </div>
         </div>
         """, unsafe_allow_html=True)
 
