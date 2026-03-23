@@ -1,5 +1,6 @@
 import json
 import os
+import base64
 from datetime import datetime, timedelta
 
 import finnhub
@@ -10,7 +11,6 @@ import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
 from openai import OpenAI
-from PIL import Image
 from plotly.subplots import make_subplots
 from xgboost import XGBRegressor
 
@@ -176,6 +176,29 @@ def apply_theme(theme):
         .signal-sell {{
             color: #ef4444 !important;
         }}
+
+        .app-header {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 18px;
+            margin: 0 0 24px 0;
+        }}
+
+        .app-header-logo {{
+            width: 86px;
+            height: 86px;
+            object-fit: contain;
+            display: block;
+        }}
+
+        .app-header-title {{
+            margin: 0;
+            font-size: 3.2rem;
+            font-weight: 800;
+            line-height: 1;
+            color: {theme["text_color"]};
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -232,6 +255,21 @@ def coerce_series(values):
 
 def clamp(value, lower, upper):
     return max(lower, min(upper, value))
+
+
+def render_app_header(logo_path, title, theme):
+    with open(logo_path, "rb") as image_file:
+        encoded_logo = base64.b64encode(image_file.read()).decode("utf-8")
+
+    st.markdown(
+        f"""
+        <div class="app-header">
+            <img class="app-header-logo" src="data:image/png;base64,{encoded_logo}" alt="Lupa logo">
+            <h1 class="app-header-title">{title}</h1>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # ---------- Data Layer: market history, news, and seasonality inputs ----------
@@ -743,7 +781,7 @@ def render_signal_card(forecast_result):
     )
 
 
-def render_news_tab(symbol, news_items, scored_news):
+def render_news_tab(symbol, news_items, scored_news, theme):
     st.subheader(f"{symbol} News")
 
     scored_lookup = {item["headline"]: item for item in scored_news}
@@ -759,7 +797,10 @@ def render_news_tab(symbol, news_items, scored_news):
             st.caption(
                 f'FinBERT: {sentiment["label"].title()} | compound {sentiment["compound"]:+.2f}'
             )
-        st.text(summary)
+        st.markdown(
+            f'<div style="color:{theme["text_color"]}; white-space: pre-wrap;">{summary}</div>',
+            unsafe_allow_html=True,
+        )
         st.caption(date)
         st.divider()
 
@@ -799,13 +840,7 @@ theme = get_theme(dark_mode)
 apply_theme(theme)
 
 logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
-logo = Image.open(logo_path)
-
-logo_col, title_col = st.columns([1, 4])
-with logo_col:
-    st.image(logo, width=120)
-with title_col:
-    st.title("Lupa AI Stock Terminal")
+render_app_header(logo_path, "Lupa AI Stock Terminal", theme)
 
 st.sidebar.text_input("Ticker", key="ticker", on_change=on_ticker_changed)
 st.sidebar.radio("Big Tech", BIG_TECHS, key="bigtech", index=None, on_change=on_bigtech_changed)
@@ -980,7 +1015,7 @@ with tab_heat:
         st.info("Heatmap data is temporarily unavailable.")
 
 with tab_news:
-    render_news_tab(symbol, news, scored_news)
+    render_news_tab(symbol, news, scored_news, theme)
 
 with tab_almanac:
     render_almanac_tab(almanac)
