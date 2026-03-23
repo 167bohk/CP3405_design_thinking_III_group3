@@ -556,66 +556,7 @@ with tab_ai:
                 
             </div>
             """, unsafe_allow_html=True)
-            # ---------- ENSEMBLE CARD ----------
-
-st.markdown(f"""
-<div style="
-    background: rgba(255,255,255,0.05);
-    padding: 20px;
-    border-radius: 15px;
-    border: 1px solid rgba(255,255,255,0.1);
-    margin-top:15px;
-">
-    <p style="color:gray; font-size:14px;">Ensemble Price</p>
-    <h2 style="margin:5px 0;">
-        ${ensemble_price:.2f}
-    </h2>
-    <span style="
-        background-color: {'#22c55e' if ensemble_price > price else '#ef4444'};
-        padding:5px 10px;
-        border-radius:20px;
-        font-size:13px;
-    ">
-        {((ensemble_price/price - 1)*100):.2f}%
-    </span>
-</div>
-""", unsafe_allow_html=True)
-
-
-# ---------- LLM CARD ----------
-
-st.markdown(f"""
-<div style="
-    background: rgba(255,255,255,0.05);
-    padding: 20px;
-    border-radius: 15px;
-    border: 1px solid rgba(255,255,255,0.1);
-    margin-top:15px;
-">
-    <p style="color:gray; font-size:14px;">LLM Price</p>
-    <h2 style="margin:5px 0;">
-        ${llm_price:.2f}
-    </h2>
-</div>
-""", unsafe_allow_html=True)
-
-
-# ---------- XGB CARD ----------
-
-st.markdown(f"""
-<div style="
-    background: rgba(255,255,255,0.05);
-    padding: 20px;
-    border-radius: 15px;
-    border: 1px solid rgba(255,255,255,0.1);
-    margin-top:15px;
-">
-    <p style="color:gray; font-size:14px;">XGBoost Price</p>
-    <h2 style="margin:5px 0;">
-        ${pred_price:.2f}
-    </h2>
-</div>
-""", unsafe_allow_html=True)
+           
 # ---------- HEATMAP ----------
 
 with tab_heat:
