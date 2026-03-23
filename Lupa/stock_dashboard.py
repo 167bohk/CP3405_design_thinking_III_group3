@@ -187,13 +187,17 @@ def initialize_session_state():
 
 def on_ticker_changed():
     ticker = st.session_state.ticker.upper()
+    st.session_state.ticker = ticker
     if ticker in BIG_TECHS:
         st.session_state.bigtech = ticker
+    else:
+        st.session_state.bigtech = None
     clear_forecast_state()
 
 
 def on_bigtech_changed():
-    st.session_state.ticker = st.session_state.bigtech
+    if st.session_state.bigtech:
+        st.session_state.ticker = st.session_state.bigtech
     clear_forecast_state()
 
 
@@ -509,6 +513,7 @@ def build_price_chart(df, theme):
             high=df["High"],
             low=df["Low"],
             close=df["Close"],
+            name="Price",
             increasing_line_color="#22c55e",
             decreasing_line_color="#ef4444",
         ),
@@ -529,6 +534,7 @@ def build_price_chart(df, theme):
         go.Bar(
             x=df.index,
             y=df["Volume"],
+            name="Volume",
             marker_color="rgba(120,160,255,0.3)",
         ),
         row=2,
@@ -543,6 +549,12 @@ def build_price_chart(df, theme):
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font={"color": theme["text_color"]},
+        legend=dict(
+            bgcolor=theme["card_bg"],
+            bordercolor=theme["grid_color"],
+            borderwidth=1,
+            font={"color": theme["text_color"]},
+        ),
         xaxis=dict(rangeslider=dict(visible=True), type="date"),
     )
     fig.update_xaxes(tickfont=dict(color=theme["text_color"]), gridcolor=theme["grid_color"])
@@ -676,7 +688,7 @@ with title_col:
     st.title("Lupa AI Stock Terminal")
 
 st.sidebar.text_input("Ticker", key="ticker", on_change=on_ticker_changed)
-st.sidebar.radio("Big Tech", BIG_TECHS, key="bigtech", on_change=on_bigtech_changed)
+st.sidebar.radio("Big Tech", BIG_TECHS, key="bigtech", index=None, on_change=on_bigtech_changed)
 period = st.sidebar.selectbox("Period", PERIOD_OPTIONS, index=2)
 
 symbol = st.session_state.ticker.upper()
