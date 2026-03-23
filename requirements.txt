@@ -3,7 +3,8 @@ yfinance
 pandas
 numpy
 plotly
-Pillow
+scikit-learn
+pillow
 finnhub-python
 openai
 xgboost
