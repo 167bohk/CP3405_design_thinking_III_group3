@@ -33,10 +33,10 @@ st.set_page_config(
 )
 
 # ---------- THEME SETTING ----------
-# [新增] 在侧边栏添加白天/黑夜切换开关
+
 dark_mode = st.sidebar.toggle("Night Mode", value=True)
 
-# [新增] 根据模式定义颜色变量，白天模式强制使用纯黑 (#000000) 确保高对比度
+
 if dark_mode:
     bg_style = "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.05), transparent 60%), radial-gradient(circle at center, #1e293b 0%, #020617 100%)"
     sidebar_bg = "#020617"
@@ -47,14 +47,14 @@ if dark_mode:
 else:
     bg_style = bg_style = "radial-gradient(circle at 50% 30%, rgba(0,0,0,0.12), transparent 55%), radial-gradient(circle at center, #ffffff 0%, #cbd5e1 100%)"
     sidebar_bg = "#ffffff"
-    text_color = "#000000"  # [修改] 白天模式强制纯黑
+    text_color = "#000000" 
     metric_bg = "#ffffff"
     plotly_template = "plotly_white"
     grid_color = "rgba(0,0,0,0.1)"
 
 # ---------- STYLE ----------
 
-# [修改] 使用 f-string 动态注入颜色变量，并增加对按钮、指标数字、输入框的强制样式覆盖
+
 st.markdown(f"""
 <style>
 
@@ -76,28 +76,23 @@ st.markdown(f"""
     border-radius:10px;
 }}
 
-/* [新增] 强制所有层级的文字、标签颜色，确保在白天模式下可见 */
 h1, h2, h3, h4, h5, p, label, span, div {{
     color: {text_color} !important;
 }}
 
-/* [新增] 专项修复：指标数字 (Metric Value) 颜色 */
 [data-testid="stMetricValue"] div {{
     color: {text_color} !important;
 }}
 
-/* [新增] 专项修复：按钮内部文字颜色保持白色 (以适配深色按钮背景) */
 .stButton > button p {{
     color: white !important;
     font-weight: 700 !important;
 }}
 
-/* [新增] 专项修复：Tab 标签页文字颜色 */
 button[data-baseweb="tab"] div {{
     color: {text_color} !important;
 }}
 
-/* [新增] 专项修复：侧边栏输入框和下拉框文字颜色保持白色 */
 .stTextInput input, .stSelectbox div[data-baseweb="select"] {{
     color: white !important;
     -webkit-text-fill-color: white !important;
@@ -225,9 +220,9 @@ sentiment = 50 + ret * 100
 fig_sent = go.Figure(go.Indicator(
     mode="gauge+number",
     value=sentiment,
-    title={'text': "Market Sentiment", 'font': {'color': text_color}},  # [修改] 显式设置标题颜色
+    title={'text': "Market Sentiment", 'font': {'color': text_color}}, 
     gauge={
-        'axis': {'range': [0, 100], 'tickcolor': text_color, 'tickfont': {'color': text_color}},  # [新增] 设置刻度文字颜色
+        'axis': {'range': [0, 100], 'tickcolor': text_color, 'tickfont': {'color': text_color}},  
         'bar': {'color': "#3b82f6"},
         'steps': [
             {'range': [0, 40], 'color': "#ef4444"},
@@ -237,7 +232,6 @@ fig_sent = go.Figure(go.Indicator(
     }
 ))
 
-# [修改] 更新仪表盘，确保内部数字和字体颜色随主题变化
 fig_sent.update_layout(template=plotly_template, paper_bgcolor='rgba(0,0,0,0)', font={'color': text_color})
 fig_sent.update_traces(number={'font': {'color': text_color}})
 
@@ -284,7 +278,6 @@ def create_chart(df):
         dragmode="pan"
     )
 
-    # [修改] 更新图表轴标及网格颜色，确保在白天模式下字符可见
     fig.update_layout(
         template=plotly_template,
         paper_bgcolor='rgba(0,0,0,0)',
@@ -292,8 +285,8 @@ def create_chart(df):
         font={'color': text_color}
     )
 
-    fig.update_xaxes(tickfont=dict(color=text_color), gridcolor=grid_color)  # [新增] 强制 X 轴刻度变色
-    fig.update_yaxes(tickfont=dict(color=text_color), gridcolor=grid_color)  # [新增] 强制 Y 轴刻度变色
+    fig.update_xaxes(tickfont=dict(color=text_color), gridcolor=grid_color)  
+    fig.update_yaxes(tickfont=dict(color=text_color), gridcolor=grid_color)  
 
     fig.update_layout(
         xaxis=dict(
@@ -416,17 +409,31 @@ with tab_ai:
 
         st.subheader("LLM Analysis")
 
-        prompt = f"""
-You are a professional quantitative analyst.
+        prompt = prompt = f"""
+        You are a professional quantitative hedge fund analyst.
 
-Stock: {symbol}
-Price: {price}
-RSI: {df['RSI'].iloc[-1]:.2f}
-Volatility: {df['Volatility'].iloc[-1]:.2%}
-Trend: {trend}
+        Analyze the stock and return a STRICT decision.
 
-Give short outlook.
-"""
+        [DATA]
+        Stock: {symbol}
+        Price: {price}
+        RSI: {df['RSI'].iloc[-1]:.2f}
+        Volatility: {df['Volatility'].iloc[-1]:.2%}
+        Trend (MA20): {trend}
+
+        Recent News Sentiment: {sentiment:.1f} / 100
+
+        [INSTRUCTIONS]
+        1. Decide the SHORT-TERM direction (1-5 days): ONLY "bullish" OR "bearish"
+        2. Use:
+        - Technicals (RSI, trend, volatility)
+        - News sentiment (IMPORTANT)
+        3. No uncertainty, no "maybe", no "neutral"
+
+        [OUTPUT FORMAT]
+        Signal: bullish OR bearish
+        Reason: <max 10 concise sentences>
+        """
 
         if st.button("Run LLM Analysis", key="llm_button"):
 
@@ -438,26 +445,42 @@ Give short outlook.
             model_signal = "bullish" if pred_price > price else "bearish"
             trend_signal = "bullish" if trend == "Bullish" else "bearish"
 
-            # NEW
             best6 = best_six_months()
             season_signal = "bullish" if best6 == "Bullish Season" else "neutral"
 
-            votes = [llm_signal, model_signal, trend_signal]
+            # ---------- WEIGHTED VOTING ----------
 
-            if season_signal != "neutral":
-                votes.append(season_signal)
+            weights = {
+                "llm": 0.4,
+                "model": 0.4,
+                "trend": 0.2
+            }
 
-            bullish = votes.count("bullish")
-            bearish = votes.count("bearish")
+            score = 0
 
-            if bullish > bearish:
+            score += weights["llm"] * (1 if llm_signal == "bullish" else -1)
+            score += weights["model"] * (1 if model_signal == "bullish" else -1)
+            score += weights["trend"] * (1 if trend_signal == "bullish" else -1)
+
+            # ---------- PRIMARY DECISION ----------
+
+            if score > 0:
                 final_signal = "BUY"
-            elif bearish > bullish:
+            elif score < 0:
                 final_signal = "SELL"
             else:
                 final_signal = "HOLD"
+                
+            # ---------- TIE BREAKER (SEASONALITY) ----------
 
-            confidence = max(bullish, bearish) / len(votes)
+            if final_signal == "HOLD" and season_signal != "neutral":
+
+                if season_signal == "bullish":
+                    final_signal = "BUY (Seasonality Tie-Break)"
+                else:
+                    final_signal = "SELL (Seasonality Tie-Break)"
+                    
+            confidence = abs(score)
 
             st.subheader("AI Trading Signal")
 
@@ -468,7 +491,7 @@ Give short outlook.
 
             LLM: **{llm_signal.upper()}**
 
-            Seasonality: **{best6}**
+            Seasonality (Tie-break): **{best6}**
 
             Signal: **{final_signal}**
 
@@ -507,12 +530,11 @@ with tab_heat:
     )
 
     fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
-    # [修改] 更新轴标及字体，确保热力图在白天模式下可见
     fig.update_layout(height=450, template=plotly_template, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
                       font={'color': text_color})
 
-    fig.update_xaxes(tickfont=dict(color=text_color))  # [新增] 强制热力图 X 轴变色
-    fig.update_yaxes(tickfont=dict(color=text_color))  # [新增] 强制热力图 Y 轴变色
+    fig.update_xaxes(tickfont=dict(color=text_color))  
+    fig.update_yaxes(tickfont=dict(color=text_color))  
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -585,15 +607,7 @@ with tab_almanac:
 
     # ---------- Best Six Months ----------
 
-    month = datetime.now().month
-
-    if month in [11, 12, 1, 2, 3, 4]:
-
-        best6 = "Bullish Season"
-
-    else:
-
-        best6 = "Weak Season"
+    best6 = best_six_months()
 
     with col1:
 
