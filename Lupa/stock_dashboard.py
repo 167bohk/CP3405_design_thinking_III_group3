@@ -499,13 +499,21 @@ with tab_ai:
         Recent News Headlines:
         {news_summary}
 
+        Almanac Signals:
+        - January Barometer: {jan_signal}
+        - First 5 Trading Days: {five_signal}
+        - Seasonality (Best 6 Months): {best6}
+
         [INSTRUCTIONS]
         1. Predict SHORT-TERM (1-5 days)
         2. Provide:
         - signal: bullish OR bearish
         - target_price: realistic price (within ±10%)
         - confidence: 0 to 1
-        3. Use technicals + news sentiment
+        3. Use:
+        - technical indicators
+        - news sentiment
+        - seasonality signals (low weight)
         4. Be decisive
 
         [OUTPUT FORMAT - JSON ONLY]
@@ -513,112 +521,133 @@ with tab_ai:
         "signal": "bullish",
         "target_price": 210.5,
         "confidence": 0.72,
-        "reason": "max 10 sentences"
+        "reason": "max 2 sentences"
         }}
         """
 
-    if st.button("Run LLM Analysis", key="llm_button"):
-        llm_text = run_llm(prompt)
+        if st.button("Run LLM Analysis", key="llm_button"):
 
-    try:
-        llm_data = json.loads(llm_text)
+            llm_text = run_llm(prompt)
 
-        llm_reason = llm_data.get("reason", "")[:200]  # 限长
-        llm_signal = llm_data.get("signal", "bearish")
-        llm_price = float(llm_data.get("target_price", price))
-        llm_conf = float(llm_data.get("confidence", 0.5))
+            with st.expander("LLM Raw Output"):
+                st.code(llm_text, language="json")
 
-    except:
-        llm_signal = "bullish" if pred_price > price else "bearish"
-        llm_price = price
-        llm_conf = 0.5
-        llm_reason = "No analysis available"
+            try:
+                llm_data = json.loads(llm_text)
+                
+                llm_signal = llm_data.get("signal", "bearish")
+                llm_price = float(llm_data.get("target_price", price))
+                llm_conf = float(llm_data.get("confidence", 0.5))
 
-    # ---------- ENSEMBLE ----------
+            except:
+                llm_signal = "bullish" if pred_price > price else "bearish"
+                llm_price = price
+                llm_conf = 0.5
+                
+                
+            model_signal = "bullish" if pred_price > price else "bearish"
+            trend_signal = "bullish" if trend == "Bullish" else "bearish"
 
-    llm_conf = min(max(llm_conf, 0.2), 0.8)
+            best6 = best_six_months()
+            season_signal = "bullish" if best6 == "Bullish Season" else "neutral"
 
-    almanac_score = get_almanac_score(jan_signal, five_signal, best6)
+            # ---------- ensembled price ----------
+            
+            llm_conf = min(max(llm_conf, 0.2), 0.8)
 
-    ensemble_price = (
-        pred_price * (1 - llm_conf) +
-        llm_price * llm_conf
-    )
+            almanac_score = get_almanac_score(jan_signal, five_signal, best6)
 
-    ensemble_price *= (1 + 0.015 * almanac_score)
+            ensemble_price = (
+                pred_price * (1 - llm_conf) +
+                llm_price * llm_conf
+            )
+            
+            ensemble_price *= (1 + 0.015 * almanac_score)
 
-    score = (ensemble_price / price - 1)
-    confidence = abs(score)
+            score = (ensemble_price / price - 1)
+            confidence = abs(score)
 
-    # ==============================
-    # UI START
-    # ==============================
+            st.subheader("AI Trading Signal")
 
-    # ---------- LLM REASON ----------
+            signal_color = "#22c55e" if ensemble_price > price else "#ef4444"
+            signal_text = "BUY" if ensemble_price > price else "SELL"
 
-    st.subheader("LLM Analysis")
+            st.markdown(f"""
+            <div style="
+                background: rgba(255,255,255,0.05);
+                padding: 25px;
+                border-radius: 15px;
+                border: 1px solid rgba(255,255,255,0.1);
+                text-align: center;
+            ">
+                <h2 style="color:{signal_color}; margin-bottom:10px;">
+                    {signal_text}
+                </h2>
+                <p style="font-size:18px; color:gray;">
+                    Confidence: {confidence:.1%}
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            # ---------- ENSEMBLE CARD ----------
 
-    st.markdown(f"""
-    <div style="
-        background: rgba(255,255,255,0.04);
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid rgba(255,255,255,0.08);
-        font-size: 15px;
-        line-height: 1.6;
+st.markdown(f"""
+<div style="
+    background: rgba(255,255,255,0.05);
+    padding: 20px;
+    border-radius: 15px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-top:15px;
+">
+    <p style="color:gray; font-size:14px;">Ensemble Price</p>
+    <h2 style="margin:5px 0;">
+        ${ensemble_price:.2f}
+    </h2>
+    <span style="
+        background-color: {'#22c55e' if ensemble_price > price else '#ef4444'};
+        padding:5px 10px;
+        border-radius:20px;
+        font-size:13px;
     ">
-    {llm_reason}
-    </div>
-    """, unsafe_allow_html=True)
+        {((ensemble_price/price - 1)*100):.2f}%
+    </span>
+</div>
+""", unsafe_allow_html=True)
 
-    # ---------- SIGNAL ----------
 
-    st.subheader("AI Trading Signal")
+# ---------- LLM CARD ----------
 
-    signal_color = "#22c55e" if ensemble_price > price else "#ef4444"
-    signal_text = "BUY" if ensemble_price > price else "SELL"
+st.markdown(f"""
+<div style="
+    background: rgba(255,255,255,0.05);
+    padding: 20px;
+    border-radius: 15px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-top:15px;
+">
+    <p style="color:gray; font-size:14px;">LLM Price</p>
+    <h2 style="margin:5px 0;">
+        ${llm_price:.2f}
+    </h2>
+</div>
+""", unsafe_allow_html=True)
 
-    st.markdown(f"""
-    <div style="
-        background: rgba(255,255,255,0.05);
-        padding: 25px;
-        border-radius: 15px;
-        border: 1px solid rgba(255,255,255,0.1);
-        text-align: center;
-    ">
-        <h2 style="color:{signal_color}; margin-bottom:10px;">
-            {signal_text}
-        </h2>
-        <p style="font-size:18px; color:gray;">
-            Confidence: {confidence:.1%}
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
 
-    # ---------- PRICE COMPARISON ----------
+# ---------- XGB CARD ----------
 
-    colA, colB, colC = st.columns(3)
-
-    colA.metric(
-        "📊 Ensemble",
-        f"${ensemble_price:.2f}",
-        f"{(ensemble_price/price - 1):.2%}"
-    )
-
-    colB.metric(
-        "🧠 LLM",
-        f"${llm_price:.2f}"
-    )
-
-    colC.metric(
-        "⚙️ XGB",
-        f"${pred_price:.2f}"
-    )
-
-    # ---------- EXTRA ----------
-
-    direction_icon = "📈" if ensemble_price > price else "📉"
-    st.caption(f"{direction_icon} Short-term outlook based on ensemble model")
+st.markdown(f"""
+<div style="
+    background: rgba(255,255,255,0.05);
+    padding: 20px;
+    border-radius: 15px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-top:15px;
+">
+    <p style="color:gray; font-size:14px;">XGBoost Price</p>
+    <h2 style="margin:5px 0;">
+        ${pred_price:.2f}
+    </h2>
+</div>
+""", unsafe_allow_html=True)
 # ---------- HEATMAP ----------
 
 with tab_heat:
