@@ -125,12 +125,32 @@ if "bigtech" not in st.session_state:
 
 def ticker_changed():
     ticker = st.session_state.ticker.upper()
+    
     if ticker in BIG_TECHS:
         st.session_state.bigtech = ticker
+    for key in [
+        "ensemble_price",
+        "llm_price",
+        "pred_price",
+        "llm_reason",
+        "llm_conf"
+    ]:
+        if key in st.session_state:
+            del st.session_state[key]
 
 
 def bigtech_changed():
     st.session_state.ticker = st.session_state.bigtech
+
+    for key in [
+        "ensemble_price",
+        "llm_price",
+        "pred_price",
+        "llm_reason",
+        "llm_conf"
+    ]:
+        if key in st.session_state:
+            del st.session_state[key]
 
 
 st.sidebar.text_input("Ticker", key="ticker", on_change=ticker_changed)
@@ -456,7 +476,7 @@ news_summary = " | ".join(
 if not news_summary:
     news_summary = "No significant recent news."
     
-# ---------- AI ----------
+# ---------- LLM ----------
 
 
 
@@ -482,6 +502,7 @@ with tab_ai:
 
         [DATA]
         Stock: {symbol}
+        Timestamp: {datetime.now()}
         Current Price: {price}
         RSI: {df['RSI'].iloc[-1]:.2f}
         Volatility: {df['Volatility'].iloc[-1]:.2%}
@@ -497,7 +518,7 @@ with tab_ai:
         - Presidential Cycle: {pres}
 
         [INSTRUCTIONS]
-        1. Predict The price for next trading day (realistic, within ±10%)
+        1. Predict the price for next trading day (realistic, within ±10%)
         2. Provide:
         - target_price: realistic price (within ±10%)
         - confidence: 0 to 1
@@ -510,7 +531,7 @@ with tab_ai:
         [OUTPUT FORMAT - JSON ONLY]
         {{"target_price": 210.5,
         "confidence": 0.72,
-        "reason": "max 10 sentences"
+        "reason": "max 15 sentences"
         }}
         """
 
@@ -538,15 +559,13 @@ with tab_ai:
             pred_price * (1 - llm_conf) +
             llm_price * llm_conf
         )
-
-        # ✅ 存状态（关键）
         st.session_state.ensemble_price = ensemble_price
         st.session_state.llm_price = llm_price
         st.session_state.pred_price = pred_price
         st.session_state.llm_reason = llm_reason
         st.session_state.llm_conf = llm_conf
 
-    # ---------- UI（稳定渲染） ----------
+    # ---------- UI ----------
     if "ensemble_price" in st.session_state:
 
         ensemble_price = st.session_state.ensemble_price
