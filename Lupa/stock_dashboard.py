@@ -496,7 +496,13 @@ with tab_ai:
 
     with col2:
 
-        st.subheader("LLM Analysis")
+        col_btn, col_title = st.columns([1, 3])
+
+        with col_btn:
+            run_clicked = st.button("Run", key="llm_button")
+
+        with col_title:
+            st.subheader("LLM Analysis")
 
         prompt = f"""
         You are a professional quantitative hedge fund analyst.
@@ -537,7 +543,7 @@ with tab_ai:
         """
 
     # ---------- BUTTON ----------
-    if st.button("Run LLM Analysis", key="llm_button"):
+    if run_clicked:
 
         llm_text = run_llm(prompt)
 
