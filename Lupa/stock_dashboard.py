@@ -443,28 +443,6 @@ news_summary = " | ".join(
 if not news_summary:
     news_summary = "No significant recent news."
     
-# ---------- GET ALMANAC SCORE ----------
-def get_almanac_score(jan_signal, five_signal, best6):
-
-    score = 0
-
-    if jan_signal == "Bullish":
-        score += 1
-    elif jan_signal == "Bearish":
-        score -= 1
-
-    if five_signal == "Bullish":
-        score += 1
-    elif five_signal == "Bearish":
-        score -= 1
-
-    if best6 == "Bullish Season":
-        score += 1
-    else:
-        score -= 1
-
-    return score / 3  # normalize to [-1, 1]
-    
 # ---------- AI ----------
 
 
@@ -529,12 +507,10 @@ with tab_ai:
 
             llm_text = run_llm(prompt)
 
-            with st.expander("LLM Raw Output"):
-                st.code(llm_text, language="json")
-
             try:
                 llm_data = json.loads(llm_text)
                 
+                llm_reason = llm_data.get("reason", "")[:200]
                 llm_signal = llm_data.get("signal", "bearish")
                 llm_price = float(llm_data.get("target_price", price))
                 llm_conf = float(llm_data.get("confidence", 0.5))
@@ -555,14 +531,10 @@ with tab_ai:
             
             llm_conf = min(max(llm_conf, 0.2), 0.8)
 
-            almanac_score = get_almanac_score(jan_signal, five_signal, best6)
-
             ensemble_price = (
                 pred_price * (1 - llm_conf) +
                 llm_price * llm_conf
             )
-            
-            ensemble_price *= (1 + 0.015 * almanac_score)
 
             score = (ensemble_price / price - 1)
             confidence = abs(score)
