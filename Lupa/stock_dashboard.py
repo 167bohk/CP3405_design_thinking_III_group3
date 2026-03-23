@@ -521,7 +521,8 @@ with tab_ai:
 
             llm_text = run_llm(prompt)
 
-            st.write(llm_text)
+            with st.expander("LLM Raw Output"):
+                st.code(llm_text, language="json")
 
             try:
                 llm_data = json.loads(llm_text)
@@ -542,7 +543,7 @@ with tab_ai:
             best6 = best_six_months()
             season_signal = "bullish" if best6 == "Bullish Season" else "neutral"
 
-            # ---------- WEIGHTED VOTING ----------
+            # ---------- ensembled price ----------
             
             llm_conf = min(max(llm_conf, 0.2), 0.8)
 
@@ -560,21 +561,42 @@ with tab_ai:
 
             st.subheader("AI Trading Signal")
 
-            st.metric(
-            "Ensemble Price",
-            f"${ensemble_price:.2f}",
-            f"{(ensemble_price/price - 1):.2%}")
+            signal_color = "#22c55e" if ensemble_price > price else "#ef4444"
+            signal_text = "BUY" if ensemble_price > price else "SELL"
 
-            st.metric(
-                "LLM Price",
+            st.markdown(f"""
+            <div style="
+                background: rgba(255,255,255,0.05);
+                padding: 25px;
+                border-radius: 15px;
+                border: 1px solid rgba(255,255,255,0.1);
+                text-align: center;
+            ">
+                <h2 style="color:{signal_color}; margin-bottom:10px;">
+                    {signal_text}
+                </h2>
+                <p style="font-size:18px; color:gray;">
+                    Confidence: {confidence:.1%}
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            colA, colB, colC = st.columns(3)
+
+            colA.metric(
+                "📊 Ensemble",
+                f"${ensemble_price:.2f}",
+                f"{(ensemble_price/price - 1):.2%}"
+            )
+
+            colB.metric(
+                "🧠 LLM",
                 f"${llm_price:.2f}"
             )
 
-            st.metric(
-                "XGB Price",
+            colC.metric(
+                "⚙️ XGB",
                 f"${pred_price:.2f}"
             )
-
 # ---------- HEATMAP ----------
 
 with tab_heat:
