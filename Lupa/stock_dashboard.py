@@ -598,8 +598,14 @@ with tab_ai:
         }}
         """
 
+        st.markdown('<div style="height: 150px;"></div>', unsafe_allow_html=True)
+        btn_left, btn_center, btn_right = st.columns([1, 2, 1])
+
+        with btn_center:
+            run_llm_clicked = st.button("Run LLM Analysis", key="llm_button", use_container_width=True)
+
     # ---------- BUTTON ----------
-    if st.button("Run LLM Analysis", key="llm_button"):
+    if run_llm_clicked:
 
         llm_text = run_llm(prompt)
 
