@@ -78,7 +78,7 @@ st.markdown(f"""
 }}
 
 h1, h2, h3, h4, h5, p, label, span, div {{
-    color: {text_color} !important;
+    color: {text_color};
 }}
 
 [data-testid="stMetricValue"] div {{
