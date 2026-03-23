@@ -57,6 +57,7 @@ else:
 
 # ---------- STYLE ----------
 
+text_color = "white" if dark_mode else "black"
 
 st.markdown(f"""
 <style>
@@ -100,7 +101,6 @@ button[data-baseweb="tab"] div {{
     color: {text_color} !important;
     -webkit-text-fill-color: {text_color} !important;
 }}
-
 </style>
 """, unsafe_allow_html=True)
 
