@@ -2,6 +2,7 @@ import json
 import os
 import base64
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import finnhub
 import numpy as np
@@ -41,6 +42,7 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY)
 BIG_TECHS = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "GOOGL", "AMD"]
 PERIOD_OPTIONS = ["3mo", "6mo", "1y", "2y", "5y"]
 FORECAST_STATE_KEY = "forecast_result"
+US_MARKET_TZ = ZoneInfo("America/New_York")
 
 
 # ---------- Theme: light/dark colors and global CSS ----------
@@ -245,6 +247,46 @@ def get_next_trading_day(base_date):
     while next_day.weekday() >= 5:
         next_day += timedelta(days=1)
     return next_day
+
+
+def get_prediction_target_context(latest_trading_timestamp):
+    latest_date = pd.Timestamp(latest_trading_timestamp).date()
+    market_now = datetime.now(US_MARKET_TZ)
+    market_date = market_now.date()
+    market_close = market_now.replace(hour=16, minute=0, second=0, microsecond=0)
+    market_is_open_day = market_date.weekday() < 5
+
+    if market_is_open_day and market_now < market_close:
+        target_date = market_date if market_date > latest_date else latest_date
+        target_label = "current US trading day close (market not closed yet)"
+    else:
+        reference_date = market_date if market_date > latest_date else latest_date
+        target_date = get_next_trading_day(reference_date)
+        target_label = "next US trading day close"
+
+    return {
+        "latest_date": latest_date,
+        "target_date": target_date,
+        "target_label": target_label,
+        "market_now": market_now,
+    }
+
+
+def keep_completed_market_data(df):
+    if df.empty:
+        return df
+
+    market_now = datetime.now(US_MARKET_TZ)
+    market_date = market_now.date()
+    market_close = market_now.replace(hour=16, minute=0, second=0, microsecond=0)
+    last_row_date = pd.Timestamp(df.index[-1]).date()
+
+    if market_date.weekday() < 5 and market_now < market_close and last_row_date == market_date:
+        completed_df = df.iloc[:-1].copy()
+        if not completed_df.empty:
+            return completed_df
+
+    return df
 
 
 def coerce_series(values):
@@ -507,11 +549,11 @@ def price_forecast(df, window=20):
 
 
 
-def build_llm_prompt(symbol, price, trend, df, news_summary, news_sentiment_summary, almanac):
-    
-    latest_date = df.index[-1].date()
-    next_date = get_next_trading_day(df.index[-1]).date()
-    
+def build_llm_prompt(symbol, price, trend, df, news_summary, news_sentiment_summary, almanac, target_context):
+    latest_date = target_context["latest_date"]
+    target_date = target_context["target_date"]
+    target_label = target_context["target_label"]
+
     return f"""
     You are a professional quantitative hedge fund analyst.
 
@@ -520,7 +562,7 @@ def build_llm_prompt(symbol, price, trend, df, news_summary, news_sentiment_summ
     Latest trading date: {latest_date}
     Current Close Price: {price}
 
-    Target prediction date: {next_date} (next trading day close)
+    Target prediction date: {target_date} ({target_label})
 
     RSI: {df['RSI'].iloc[-1]:.2f}
     Volatility: {df['Volatility'].iloc[-1]:.2%}
@@ -540,10 +582,10 @@ def build_llm_prompt(symbol, price, trend, df, news_summary, news_sentiment_summ
 
     [INSTRUCTIONS]
 
-    1. Predict the CLOSE price for the next trading day (T+1).
+    1. Predict the CLOSE price for the target US trading session.
 
     - Latest trading date: {latest_date}
-    - Target prediction date: {next_date}
+    - Target prediction date: {target_date}
     - target_price MUST be the closing price of the target date
 
     2. Provide:
@@ -593,7 +635,7 @@ def parse_llm_response(llm_text, fallback_price):
         return fallback_price, 0.5, "No analysis available", llm_text
 
 
-def build_forecast_result(current_price, pred_price, llm_price, llm_conf, llm_reason):
+def build_forecast_result(current_price, pred_price, llm_price, llm_conf, llm_reason, target_context):
     llm_conf = min(max(llm_conf, 0.2), 0.8)
     ensemble_price = (pred_price * (1 - llm_conf)) + (llm_price * llm_conf)
 
@@ -605,7 +647,8 @@ def build_forecast_result(current_price, pred_price, llm_price, llm_conf, llm_re
         "llm_conf": llm_conf,
         "signal_text": "BUY" if ensemble_price > current_price else "SELL",
         "predicted_change_pct": ((ensemble_price - current_price) / current_price) * 100,
-        "predicted_date": get_next_trading_day(datetime.now()).strftime("%Y-%m-%d"),
+        "predicted_date": target_context["target_date"].strftime("%Y-%m-%d"),
+        "predicted_label": target_context["target_label"],
     }
 
 
@@ -775,6 +818,7 @@ def render_signal_card(forecast_result):
                 Forecast for {forecast_result["predicted_date"]} |
                 {forecast_result["predicted_change_pct"]:+.2f}% vs current
             </div>
+            <div class="signal-card-meta">{forecast_result["predicted_label"]}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -844,13 +888,14 @@ render_app_header(logo_path, "Lupa AI Stock Terminal", theme)
 
 st.sidebar.text_input("Ticker", key="ticker", on_change=on_ticker_changed)
 st.sidebar.radio("Big Tech", BIG_TECHS, key="bigtech", index=None, on_change=on_bigtech_changed)
-period = st.sidebar.selectbox("Period", PERIOD_OPTIONS, index=2)
+period = st.sidebar.selectbox("Analysis Window", PERIOD_OPTIONS, index=2)
 
 symbol = st.session_state.ticker.upper()
-df = load_price_data(symbol, period)
+raw_df = load_price_data(symbol, period)
+df = keep_completed_market_data(raw_df)
 
 if df.empty:
-    st.error("Ticker not found")
+    st.error("Ticker not found or latest completed close is not available yet")
     st.stop()
 
 news = get_news(symbol)
@@ -865,6 +910,7 @@ technical_sentiment = calculate_technical_sentiment(df)
 news_sentiment = aggregate_news_sentiment(scored_news)
 sentiment = 0.7 * technical_sentiment + 0.3 * news_sentiment
 pred_price = price_forecast(df)
+target_context = get_prediction_target_context(df.index[-1])
 
 news_summary = " | ".join(
     news_item.get("headline", "")[:120]
@@ -942,6 +988,7 @@ with tab_ai:
         news_summary,
         news_sentiment_summary,
         almanac,
+        target_context,
     )
     run_llm_clicked = False
 
@@ -969,6 +1016,7 @@ with tab_ai:
             llm_price=llm_price,
             llm_conf=llm_conf,
             llm_reason=llm_reason,
+            target_context=target_context,
         )
 
     forecast_result = st.session_state.get(FORECAST_STATE_KEY)
