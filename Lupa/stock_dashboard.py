@@ -130,6 +130,9 @@ button[data-baseweb="tab"] div {{
 
 .signal-card-title {{
     margin: 0;
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1.2;
 }}
 
 .signal-buy {{
@@ -681,7 +684,7 @@ with tab_ai:
             padding: 25px;
             margin-bottom:10px;
         ">
-            <h2 class="signal-card-title {signal_class}">{arrow} {signal_text}</h2>
+            <div class="signal-card-title {signal_class}">{arrow} {signal_text}</div>
         </div>
         """, unsafe_allow_html=True)
 
