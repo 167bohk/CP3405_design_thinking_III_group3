@@ -1,474 +1,242 @@
-import yfinance as yf
-import pandas as pd
-import numpy as np
-import streamlit as st
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-from datetime import datetime, timedelta
-from PIL import Image
-import finnhub
-from openai import OpenAI
-import os
-from xgboost import XGBRegressor
 import json
+import os
+from datetime import datetime, timedelta
 
-# ---------- CONFIG ----------
+import finnhub
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+import yfinance as yf
+from openai import OpenAI
+from PIL import Image
+from plotly.subplots import make_subplots
+from xgboost import XGBRegressor
 
-FINNHUB_API_KEY = st.secrets["FINNHUB_API_KEY"]
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 
-finnhub_client = finnhub.Client(api_key=FINNHUB_API_KEY)
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-BIG_TECHS = [
-    "AAPL", "MSFT", "NVDA", "AMZN",
-    "META", "TSLA", "GOOGL", "AMD"
-]
+# ---------- App Setup: page metadata, API clients, shared constants ----------
 
 st.set_page_config(
     page_title="Lupa AI Stock Terminal",
     layout="wide",
     page_icon="📈",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# ---------- THEME SETTING ----------
+FINNHUB_API_KEY = st.secrets["FINNHUB_API_KEY"]
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 
-dark_mode = st.sidebar.toggle("Night Mode", value=True)
+finnhub_client = finnhub.Client(api_key=FINNHUB_API_KEY)
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-
-if dark_mode:
-    bg_style = "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.05), transparent 60%), radial-gradient(circle at center, #1e293b 0%, #020617 100%)"
-    sidebar_bg = "#020617"
-    text_color = "#ffffff"
-    muted_text_color = "#ffffff"
-    metric_bg = "rgba(255,255,255,0.05)"
-    card_bg = "rgba(255,255,255,0.06)"
-    card_border = "1px solid rgba(255,255,255,0.10)"
-    plotly_template = "plotly_dark"
-    grid_color = "rgba(255,255,255,0.1)"
-else:
-    bg_style = bg_style = "radial-gradient(circle at 50% 30%, rgba(0,0,0,0.12), transparent 55%), radial-gradient(circle at center, #ffffff 0%, #cbd5e1 100%)"
-    sidebar_bg = "#ffffff"
-    text_color = "#000000"
-    muted_text_color = "#000000"
-    metric_bg = "#ffffff"
-    card_bg = "rgba(255,255,255,0.92)"
-    card_border = "1px solid rgba(15,23,42,0.08)"
-    plotly_template = "plotly_white"
-    grid_color = "rgba(0,0,0,0.1)"
-
-# ---------- STYLE ----------
+BIG_TECHS = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "GOOGL", "AMD"]
+PERIOD_OPTIONS = ["3mo", "6mo", "1y", "2y", "5y"]
+FORECAST_STATE_KEY = "forecast_result"
 
 
-st.markdown(f"""
-<style>
+# ---------- Theme: light/dark colors and global CSS ----------
 
-[data-testid="stAppViewContainer"] {{
-    background: {bg_style} !important;
-}}
+def get_theme(is_dark_mode):
+    if is_dark_mode:
+        return {
+            "bg_style": (
+                "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.05), transparent 60%), "
+                "radial-gradient(circle at center, #1e293b 0%, #020617 100%)"
+            ),
+            "sidebar_bg": "#020617",
+            "text_color": "#ffffff",
+            "muted_text_color": "#cbd5e1",
+            "metric_bg": "rgba(255,255,255,0.05)",
+            "card_bg": "rgba(255,255,255,0.06)",
+            "card_border": "1px solid rgba(255,255,255,0.10)",
+            "plotly_template": "plotly_dark",
+            "grid_color": "rgba(255,255,255,0.10)",
+        }
 
-[data-testid="stSidebar"] {{
-    background-color: {sidebar_bg};
-}}
+    return {
+        "bg_style": (
+            "radial-gradient(circle at 50% 30%, rgba(0,0,0,0.12), transparent 55%), "
+            "radial-gradient(circle at center, #ffffff 0%, #cbd5e1 100%)"
+        ),
+        "sidebar_bg": "#ffffff",
+        "text_color": "#000000",
+        "muted_text_color": "#334155",
+        "metric_bg": "#ffffff",
+        "card_bg": "rgba(255,255,255,0.92)",
+        "card_border": "1px solid rgba(15,23,42,0.08)",
+        "plotly_template": "plotly_white",
+        "grid_color": "rgba(0,0,0,0.10)",
+    }
 
-.block-container{{
-    padding-top:2rem;
-}}
 
-[data-testid="stMetric"]{{
-    background:{metric_bg};
-    padding:15px;
-    border-radius:10px;
-}}
+def apply_theme(theme):
+    st.markdown(
+        f"""
+        <style>
+        [data-testid="stAppViewContainer"] {{
+            background: {theme["bg_style"]} !important;
+        }}
 
-h1, h2, h3, h4, h5, p, label, span, div {{
-    color: {text_color};
-}}
+        [data-testid="stSidebar"] {{
+            background-color: {theme["sidebar_bg"]};
+        }}
 
-[data-testid="stSidebar"] *,
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] p,
-[data-testid="stSidebar"] span,
-[data-testid="stSidebar"] div {{
-    color: {text_color} !important;
-}}
+        .block-container {{
+            padding-top: 2rem;
+        }}
 
-[data-testid="stMetricValue"] div {{
-    color: {text_color} !important;
-}}
+        [data-testid="stMetric"] {{
+            background: {theme["metric_bg"]};
+            padding: 15px;
+            border-radius: 10px;
+        }}
 
-.stButton > button p {{
-    color: white !important;
-    font-weight: 700 !important;
-}}
+        h1, h2, h3, h4, h5, p, label, span, div {{
+            color: {theme["text_color"]};
+        }}
 
-button[data-baseweb="tab"] div {{
-    color: {text_color} !important;
-}}
+        [data-testid="stSidebar"] *,
+        [data-testid="stSidebar"] label,
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] div {{
+            color: {theme["text_color"]} !important;
+        }}
 
-.stTextInput input,
-.stSelectbox div[data-baseweb="select"] > div,
-.stSelectbox input {{
-    color: {text_color} !important;
-    -webkit-text-fill-color: {text_color} !important;
-}}
+        [data-testid="stMetricValue"] div,
+        button[data-baseweb="tab"] div {{
+            color: {theme["text_color"]} !important;
+        }}
 
-.themed-card {{
-    background: {card_bg};
-    border: {card_border};
-    border-radius: 15px;
-}}
+        .stTextInput input,
+        .stSelectbox div[data-baseweb="select"] > div,
+        .stSelectbox input {{
+            color: {theme["text_color"]} !important;
+            -webkit-text-fill-color: {theme["text_color"]} !important;
+        }}
 
-.signal-card {{
-    background: {card_bg};
-    border: {card_border};
-    border-radius: 15px;
-    text-align: center;
-}}
+        .stButton > button p {{
+            color: white !important;
+            font-weight: 700 !important;
+        }}
 
-.signal-card-title {{
-    margin: 0;
-    font-size: 2rem;
-    font-weight: 700;
-    line-height: 1.2;
-}}
+        .themed-card {{
+            background: {theme["card_bg"]};
+            border: {theme["card_border"]};
+            border-radius: 15px;
+        }}
 
-.signal-card-meta {{
-    margin-top: 10px;
-    font-size: 1rem;
-    color: {text_color};
-}}
+        .signal-card {{
+            background: {theme["card_bg"]};
+            border: {theme["card_border"]};
+            border-radius: 15px;
+            text-align: center;
+        }}
 
-.signal-buy {{
-    color: #22c55e !important;
-}}
+        .signal-card-title {{
+            margin: 0;
+            font-size: 2rem;
+            font-weight: 700;
+            line-height: 1.2;
+        }}
 
-.signal-sell {{
-    color: #ef4444 !important;
-}}
+        .signal-card-meta {{
+            margin-top: 10px;
+            font-size: 1rem;
+            color: {theme["text_color"]};
+        }}
 
-</style>
-""", unsafe_allow_html=True)
+        .signal-buy {{
+            color: #22c55e !important;
+        }}
 
+        .signal-sell {{
+            color: #ef4444 !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ---------- Session State: initialize and reset derived forecast output ----------
+
+def clear_forecast_state():
+    st.session_state.pop(FORECAST_STATE_KEY, None)
+
+
+def initialize_session_state():
+    st.session_state.setdefault("ticker", "AAPL")
+    st.session_state.setdefault("bigtech", "AAPL")
+
+
+def on_ticker_changed():
+    ticker = st.session_state.ticker.upper()
+    if ticker in BIG_TECHS:
+        st.session_state.bigtech = ticker
+    clear_forecast_state()
+
+
+def on_bigtech_changed():
+    st.session_state.ticker = st.session_state.bigtech
+    clear_forecast_state()
+
+
+# ---------- Shared Helpers: small reusable calculations and formatters ----------
 
 def get_signal_style(value, reference):
     if value > reference:
-        return "↑ Bullish", "#22c55e"
-    else:
-        return "↓ Bearish", "#ef4444"
-    
+        return "Bullish", "#22c55e"
+    return "Bearish", "#ef4444"
+
+
 def get_next_trading_day(base_date):
     next_day = base_date + timedelta(days=1)
-
     while next_day.weekday() >= 5:
         next_day += timedelta(days=1)
-
     return next_day
 
 
-# ---------- LOGO ----------
-
-logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
-logo = Image.open(logo_path)
-
-col_logo, col_title = st.columns([1, 4])
-
-with col_logo:
-    st.image(logo, width=120)
-
-with col_title:
-    st.title("Lupa AI Stock Terminal")
-
-# ---------- SIDEBAR ----------
-
-if "ticker" not in st.session_state:
-    st.session_state.ticker = "AAPL"
-
-if "bigtech" not in st.session_state:
-    st.session_state.bigtech = "AAPL"
+def coerce_series(values):
+    if isinstance(values, pd.DataFrame):
+        return values.iloc[:, 0]
+    return values
 
 
-def ticker_changed():
-    ticker = st.session_state.ticker.upper()
-    
-    if ticker in BIG_TECHS:
-        st.session_state.bigtech = ticker
-    for key in [
-        "ensemble_price",
-        "llm_price",
-        "pred_price",
-        "llm_reason",
-        "llm_conf"
-    ]:
-        if key in st.session_state:
-            del st.session_state[key]
-
-
-def bigtech_changed():
-    st.session_state.ticker = st.session_state.bigtech
-
-    for key in [
-        "ensemble_price",
-        "llm_price",
-        "pred_price",
-        "llm_reason",
-        "llm_conf"
-    ]:
-        if key in st.session_state:
-            del st.session_state[key]
-
-
-st.sidebar.text_input("Ticker", key="ticker", on_change=ticker_changed)
-
-st.sidebar.radio("Big Tech", BIG_TECHS, key="bigtech", on_change=bigtech_changed)
-
-symbol = st.session_state.ticker.upper()
-
-period = st.sidebar.selectbox(
-    "Period",
-    ["3mo", "6mo", "1y", "2y", "5y"],
-    index=2
-)
-
-
-# ---------- DATA ----------
+# ---------- Data Layer: market history, news, and seasonality inputs ----------
 
 @st.cache_data
-def load_data(symbol, period):
+def load_price_data(symbol, period):
     stock = yf.Ticker(symbol)
     df = stock.history(period=period)
+
+    if df.empty:
+        return df
 
     df["MA20"] = df["Close"].rolling(20).mean()
 
     delta = df["Close"].diff()
-
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-
     df["RSI"] = 100 - (100 / (1 + gain / loss))
 
     df["Returns"] = df["Close"].pct_change()
-
     df["Volatility"] = df["Returns"].rolling(20).std() * np.sqrt(252)
 
-    # MACD
     ema12 = df["Close"].ewm(span=12).mean()
     ema26 = df["Close"].ewm(span=26).mean()
-
     df["MACD"] = ema12 - ema26
     df["MACD_signal"] = df["MACD"].ewm(span=9).mean()
 
-    # Bollinger Bands
     df["BB_std"] = df["Close"].rolling(20).std()
     df["BB_upper"] = df["MA20"] + 2 * df["BB_std"]
     df["BB_lower"] = df["MA20"] - 2 * df["BB_std"]
 
-    # Volume momentum
     df["Volume_MA20"] = df["Volume"].rolling(20).mean()
     df["Volume_momentum"] = df["Volume"] / df["Volume_MA20"]
-
     return df
 
-
-df = load_data(symbol, period)
-
-if df.empty:
-    st.error("Ticker not found")
-    st.stop()
-
-price = df["Close"].iloc[-1]
-ret = df["Returns"].iloc[-1]
-
-# ---------- HEADER ----------
-
-st.markdown(f"## 📊 {symbol} Market Overview")
-
-col1, col2, col3, col4 = st.columns(4)
-
-trend = "Bullish" if price > df["MA20"].iloc[-1] else "Bearish"
-
-with col1:
-    st.metric("Price", f"${price:.2f}", f"{ret:.2%}")
-
-with col2:
-    st.metric("Trend", trend)
-
-with col3:
-    st.metric("Volatility", f"{df['Volatility'].iloc[-1]:.2%}")
-
-with col4:
-    st.metric("RSI", f"{df['RSI'].iloc[-1]:.1f}")
-
-# ---------- MARKET SENTIMENT ----------
-
-sentiment = 50 + ret * 100
-
-fig_sent = go.Figure(go.Indicator(
-    mode="gauge+number",
-    value=sentiment,
-    title={'text': "Market Sentiment", 'font': {'color': text_color}}, 
-    gauge={
-        'axis': {'range': [0, 100], 'tickcolor': text_color, 'tickfont': {'color': text_color}},  
-        'bar': {'color': "#3b82f6"},
-        'steps': [
-            {'range': [0, 40], 'color': "#ef4444"},
-            {'range': [40, 60], 'color': "#facc15"},
-            {'range': [60, 100], 'color': "#22c55e"}
-        ]
-    }
-))
-
-fig_sent.update_layout(template=plotly_template, paper_bgcolor='rgba(0,0,0,0)', font={'color': text_color})
-fig_sent.update_traces(number={'font': {'color': text_color}})
-
-st.plotly_chart(fig_sent, use_container_width=True)
-
-
-# ---------- CHART ----------
-
-def create_chart(df):
-    fig = make_subplots(
-        rows=2,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.03,
-        row_heights=[0.75, 0.25]
-    )
-
-    fig.add_trace(go.Candlestick(
-        x=df.index,
-        open=df["Open"],
-        high=df["High"],
-        low=df["Low"],
-        close=df["Close"],
-        increasing_line_color="#22c55e",
-        decreasing_line_color="#ef4444"
-    ), row=1, col=1)
-
-    fig.add_trace(go.Scatter(
-        x=df.index,
-        y=df["MA20"],
-        line=dict(color="#60a5fa", width=2),
-        name="MA20"
-    ), row=1, col=1)
-
-    fig.add_trace(go.Bar(
-        x=df.index,
-        y=df["Volume"],
-        marker_color="rgba(120,160,255,0.3)"
-    ), row=2, col=1)
-
-    fig.update_layout(
-        height=650,
-        hovermode="x unified",
-        dragmode="pan"
-    )
-
-    fig.update_layout(
-        template=plotly_template,
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font={'color': text_color}
-    )
-
-    fig.update_xaxes(tickfont=dict(color=text_color), gridcolor=grid_color)  
-    fig.update_yaxes(tickfont=dict(color=text_color), gridcolor=grid_color)  
-
-    fig.update_layout(
-        xaxis=dict(
-            rangeslider=dict(visible=True),
-            type="date"
-        )
-    )
-
-    return fig
-
-
-
-# ---------- XGBOOST MODEL ----------
-
-@st.cache_resource
-def train_model(X, y):
-    model = XGBRegressor(
-        n_estimators=80,
-        max_depth=3,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        n_jobs=1
-    )
-
-    model.fit(X, y)
-
-    return model
-
-
-def price_forecast(df, window=20):
-    df = df.tail(350)
-    df = df.dropna()
-
-    features = [
-        "Close", "MA20", "RSI", "Returns", "Volatility",
-        "MACD", "MACD_signal", "BB_upper", "BB_lower",
-        "Volume_momentum"
-    ]
-
-    data = df[features].values
-
-    X = []
-    y = []
-
-    for i in range(window, len(data)):
-        X.append(data[i - window:i].flatten())
-        y.append(data[i][0])
-
-    X = np.array(X)
-    y = np.array(y)
-
-    model = train_model(X, y)
-
-    last_window = data[-window:].flatten().reshape(1, -1)
-
-    pred = model.predict(last_window)
-
-    return float(pred[0])
-
-
-# ---------- LLM ----------
-
-@st.cache_data(ttl=600)
-def run_llm(prompt):
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"}
-    )
-
-    return response.choices[0].message.content
-
-
-
-# ---------- TABS ----------
-
-tab_chart, tab_ai, tab_almanac, tab_heat, tab_news = st.tabs([
-    "📊 Chart",
-    "🤖 AI Forecast",
-    "📅 Almanac",
-    "🌎 Heatmap",
-    "📰 News"
-])
-# ---------- CHART ----------
-
-with tab_chart:
-    fig = create_chart(df)
-    st.plotly_chart(
-        fig,
-        use_container_width=True,
-        config={"scrollZoom": True}
-    )
-# ---------- NEWS DATA (GLOBAL) ----------
 
 @st.cache_data(ttl=600)
 def get_news(symbol):
@@ -477,330 +245,527 @@ def get_news(symbol):
 
     try:
         return finnhub_client.company_news(symbol, _from=last_week, to=today)
-    except:
+    except Exception:
         return []
 
-news = get_news(symbol)
 
-# ---------- ALMANAC DATA (GLOBAL) ----------
+@st.cache_data(ttl=3600)
+def get_almanac_signals():
+    spy = yf.download("SPY", period="2y", progress=False)
 
-spy = yf.download("SPY", period="2y", progress=False)
-jan = spy[spy.index.month == 1]
+    if spy.empty:
+        return {
+            "jan_signal": "Neutral",
+            "five_signal": "Neutral",
+            "best6": "Neutral Season",
+            "pres": "Unknown",
+        }
 
-# January Barometer
-if len(jan) > 5:
-    close = jan["Close"]
-    if isinstance(close, pd.DataFrame):
-        close = close.iloc[:, 0]
-    jan_return = float((close.iloc[-1] / close.iloc[0]) - 1)
-    jan_signal = "Bullish" if jan_return > 0 else "Bearish"
-else:
+    jan = spy[spy.index.month == 1]
+
     jan_signal = "Neutral"
+    if len(jan) > 5:
+        jan_close = coerce_series(jan["Close"])
+        jan_return = float((jan_close.iloc[-1] / jan_close.iloc[0]) - 1)
+        jan_signal = "Bullish" if jan_return > 0 else "Bearish"
 
-# First Five Days
-jan5 = jan.head(5)
-
-if len(jan5) == 5:
-    close = jan5["Close"]
-    if isinstance(close, pd.DataFrame):
-        close = close.iloc[:, 0]
-    jan5_return = float((close.iloc[-1] / close.iloc[0]) - 1)
-    five_signal = "Bullish" if jan5_return > 0 else "Bearish"
-else:
     five_signal = "Neutral"
+    jan5 = jan.head(5)
+    if len(jan5) == 5:
+        jan5_close = coerce_series(jan5["Close"])
+        jan5_return = float((jan5_close.iloc[-1] / jan5_close.iloc[0]) - 1)
+        five_signal = "Bullish" if jan5_return > 0 else "Bearish"
 
-# Best Six Months
+    current_month = datetime.now().month
+    best6 = "Bullish Season" if current_month in [11, 12, 1, 2, 3, 4] else "Weak Season"
 
-def best_six_months():
-    month = datetime.now().month
-
-    if month in [11, 12, 1, 2, 3, 4]:
-        return "Bullish Season"
+    year = datetime.now().year
+    cycle = year % 4
+    if cycle == 0:
+        pres = "Election Year"
+    elif cycle == 1:
+        pres = "Post Election"
+    elif cycle == 2:
+        pres = "Midterm Weakness"
     else:
-        return "Weak Season"
-    
-best6 = best_six_months()
+        pres = "Pre Election Bullish"
 
-# Presidential Cycle
- 
-year = datetime.now().year
-cycle = year % 4
-
-if cycle == 0:
-    pres = "Election Year"
-elif cycle == 1:
-    pres = "Post Election"
-elif cycle == 2:
-    pres = "Midterm Weakness"
-else:
-    pres = "Pre Election Bullish"
-
-# ---------- NEWS SUMMARY (FOR LLM) ----------
-
-news_summary = " | ".join(
-    [n.get("headline", "")[:120] for n in news[:5] if n.get("headline")]
-)
-
-if not news_summary:
-    news_summary = "No significant recent news."
-    
-# ---------- LLM ----------
+    return {
+        "jan_signal": jan_signal,
+        "five_signal": five_signal,
+        "best6": best6,
+        "pres": pres,
+    }
 
 
+# ---------- Forecasting: XGBoost model, LLM prompt, and ensemble output ----------
 
-with tab_ai:
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        st.subheader("XGBoost Prediction")
-
-        pred_price = price_forecast(df)
-
-        signal_text, signal_color = get_signal_style(pred_price, price)
-
-        st.markdown(f"""
-        <div style="
-            background: {card_bg};
-            border: {card_border};
-            padding: 20px;
-            border-radius: 15px;
-        ">
-            <p style="color:{muted_text_color};">Predicted Price</p>
-            <h2>${pred_price:.2f}</h2>
-            <span style="color:{signal_color}; font-weight:600;">
-                {signal_text}
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
+def train_model(X, y):
+    model = XGBRegressor(
+        n_estimators=80,
+        max_depth=3,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        n_jobs=1,
+    )
+    model.fit(X, y)
+    return model
 
 
+def price_forecast(df, window=20):
+    feature_columns = [
+        "Close",
+        "MA20",
+        "RSI",
+        "Returns",
+        "Volatility",
+        "MACD",
+        "MACD_signal",
+        "BB_upper",
+        "BB_lower",
+        "Volume_momentum",
+    ]
 
-        prompt = f"""
-        You are a professional quantitative hedge fund analyst.
+    training_df = df.tail(350).dropna()
+    if len(training_df) <= window:
+        return float(df["Close"].iloc[-1])
 
-        [DATA]
-        Stock: {symbol}
-        Timestamp: {datetime.now()}
-        Current Price: {price}
-        RSI: {df['RSI'].iloc[-1]:.2f}
-        Volatility: {df['Volatility'].iloc[-1]:.2%}
-        Trend (MA20): {trend}
+    feature_matrix = training_df[feature_columns].values
 
-        Recent News Headlines:
-        {news_summary}
+    X = []
+    y = []
+    for index in range(window, len(feature_matrix)):
+        X.append(feature_matrix[index - window : index].flatten())
+        y.append(feature_matrix[index][0])
 
-        Almanac Signals:
-        - January Barometer: {jan_signal}
-        - First 5 Trading Days: {five_signal}
-        - Seasonality (Best 6 Months): {best6}
-        - Presidential Cycle: {pres}
+    X = np.array(X)
+    y = np.array(y)
 
-        [INSTRUCTIONS]
-        1. Predict the price for next trading day (realistic, within ±10%)
-        2. Provide:
-        - target_price: realistic price (within ±10%)
-        - confidence: 0 to 1
-        3. Use:
-        - technical indicators
-        - news sentiment
-        - Almanac Signals: (low weight)
-        4. Be decisive
+    model = train_model(X, y)
+    last_window = feature_matrix[-window:].flatten().reshape(1, -1)
+    return float(model.predict(last_window)[0])
 
-        [OUTPUT FORMAT - JSON ONLY]
-        {{"target_price": 210.5,
-        "confidence": 0.72,
-        "reason": "max 15 sentences"
-        }}
-        """
 
-        st.markdown('<div style="height: 150px;"></div>', unsafe_allow_html=True)
-        btn_left, btn_center, btn_right = st.columns([1, 2, 1])
+def build_llm_prompt(symbol, price, trend, df, news_summary, almanac):
+    return f"""
+    You are a professional quantitative hedge fund analyst.
 
-        with btn_center:
-            run_llm_clicked = st.button("Run LLM Analysis", key="llm_button", use_container_width=True)
+    [DATA]
+    Stock: {symbol}
+    Timestamp: {datetime.now()}
+    Current Price: {price}
+    RSI: {df['RSI'].iloc[-1]:.2f}
+    Volatility: {df['Volatility'].iloc[-1]:.2%}
+    Trend (MA20): {trend}
 
-    # ---------- BUTTON ----------
-    if run_llm_clicked:
+    Recent News Headlines:
+    {news_summary}
 
-        llm_text = run_llm(prompt)
+    Almanac Signals:
+    - January Barometer: {almanac["jan_signal"]}
+    - First 5 Trading Days: {almanac["five_signal"]}
+    - Seasonality (Best 6 Months): {almanac["best6"]}
+    - Presidential Cycle: {almanac["pres"]}
 
-        try:
-            llm_data = json.loads(llm_text)
+    [INSTRUCTIONS]
+    1. Predict the price for next trading day (realistic, within +/-10%)
+    2. Provide:
+    - target_price: realistic price (within +/-10%)
+    - confidence: 0 to 1
+    3. Use:
+    - technical indicators
+    - news sentiment
+    - Almanac Signals: low weight
+    4. Be decisive
 
-            llm_price = llm_data.get("target_price", price)
-            llm_conf = llm_data.get("confidence", 0.5)
-            llm_reason = llm_data.get("reason", "")
+    [OUTPUT FORMAT - JSON ONLY]
+    {{
+      "target_price": 210.5,
+      "confidence": 0.72,
+      "reason": "max 15 sentences"
+    }}
+    """
 
-            llm_price = float(llm_price) if llm_price else price
-            llm_conf = float(llm_conf) if llm_conf else 0.5
 
-            llm_conf = min(max(llm_conf, 0), 1)
+@st.cache_data(ttl=600)
+def run_llm(prompt):
+    response = openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
+    )
+    return response.choices[0].message.content
 
-            if not llm_reason:
-                llm_reason = "No reasoning provided"
 
-            llm_reason = llm_reason[:2000]
+def parse_llm_response(llm_text, fallback_price):
+    try:
+        llm_data = json.loads(llm_text)
+        llm_price = float(llm_data.get("target_price", fallback_price) or fallback_price)
+        llm_conf = float(llm_data.get("confidence", 0.5) or 0.5)
+        llm_conf = min(max(llm_conf, 0), 1)
+        llm_reason = (llm_data.get("reason") or "No reasoning provided")[:2000]
+        return llm_price, llm_conf, llm_reason, None
+    except Exception:
+        return fallback_price, 0.5, "No analysis available", llm_text
 
-        except Exception as e:
-            st.error("LLM parsing failed")
-            st.write(llm_text)
 
-            llm_price = price
-            llm_conf = 0.5
-            llm_reason = "No analysis available"
+def build_forecast_result(current_price, pred_price, llm_price, llm_conf, llm_reason):
+    llm_conf = min(max(llm_conf, 0.2), 0.8)
+    ensemble_price = (pred_price * (1 - llm_conf)) + (llm_price * llm_conf)
 
-        # ---------- ENSEMBLE ----------
-        llm_conf = min(max(llm_conf, 0.2), 0.8)
+    return {
+        "ensemble_price": ensemble_price,
+        "llm_price": llm_price,
+        "pred_price": pred_price,
+        "llm_reason": llm_reason,
+        "llm_conf": llm_conf,
+        "signal_text": "BUY" if ensemble_price > current_price else "SELL",
+        "predicted_change_pct": ((ensemble_price - current_price) / current_price) * 100,
+        "predicted_date": get_next_trading_day(datetime.now()).strftime("%Y-%m-%d"),
+    }
 
-        ensemble_price = (
-            pred_price * (1 - llm_conf) +
-            llm_price * llm_conf
+
+# ---------- Charts: reusable Plotly figures for dashboard sections ----------
+
+def build_sentiment_gauge(sentiment, theme):
+    fig = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=sentiment,
+            title={"text": "Market Sentiment", "font": {"color": theme["text_color"]}},
+            gauge={
+                "axis": {
+                    "range": [0, 100],
+                    "tickcolor": theme["text_color"],
+                    "tickfont": {"color": theme["text_color"]},
+                },
+                "bar": {"color": "#3b82f6"},
+                "steps": [
+                    {"range": [0, 40], "color": "#ef4444"},
+                    {"range": [40, 60], "color": "#facc15"},
+                    {"range": [60, 100], "color": "#22c55e"},
+                ],
+            },
         )
-        st.session_state.ensemble_price = ensemble_price
-        st.session_state.llm_price = llm_price
-        st.session_state.pred_price = pred_price
-        st.session_state.llm_reason = llm_reason
-        st.session_state.llm_conf = llm_conf
+    )
+    fig.update_layout(
+        template=theme["plotly_template"],
+        paper_bgcolor="rgba(0,0,0,0)",
+        font={"color": theme["text_color"]},
+    )
+    fig.update_traces(number={"font": {"color": theme["text_color"]}})
+    return fig
 
-    # ---------- UI ----------
-    if "ensemble_price" in st.session_state:
 
-        ensemble_price = st.session_state.ensemble_price
-        llm_price = st.session_state.llm_price
-        pred_price = st.session_state.pred_price
-        llm_reason = st.session_state.llm_reason
-        llm_conf = st.session_state.llm_conf
-
-        # ---------- REASON ----------
-        st.markdown("### 🧠 LLM Analysis")
-
-        st.markdown(f"""
-        <div class="themed-card" style="
-            padding: 15px;
-            border-radius: 10px;
-            font-size: 15px;
-            line-height: 1.6;
-            margin-bottom:10px;
-        ">
-        {llm_reason}
-        </div>
-        """, unsafe_allow_html=True)
-
-        # ---------- SIGNAL ----------
-        signal_text = "BUY" if ensemble_price > price else "SELL"
-        signal_class = "signal-buy" if signal_text == "BUY" else "signal-sell"
-        arrow = "↑" if signal_text == "BUY" else "↓"
-
-        arrow = "↑" if signal_text == "BUY" else "↓"
-        predicted_change_pct = ((ensemble_price - price) / price) * 100
-        predicted_date = get_next_trading_day(datetime.now()).strftime("%Y-%m-%d")
-
-        st.markdown(f"""
-        <div class="signal-card" style="
-            padding: 25px;
-            margin-bottom:10px;
-        ">
-            <div class="signal-card-title {signal_class}">{"\u2191" if signal_text == "BUY" else "\u2193"} {signal_text}</div>
-            <div class="signal-card-meta">
-                Forecast for {predicted_date} | {predicted_change_pct:+.2f}% vs current
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # ---------- VERTICAL CARDS ----------
-        for title, value in [
-            ("Ensemble Price", ensemble_price),
-            ("LLM Price", llm_price),
-            ("XGBoost Price", pred_price)
-        ]:
-
-            signal_text, signal_color = get_signal_style(value, price)
-
-            st.markdown(f"""
-            <div style="
-                background: {card_bg};
-                border: {card_border};
-                padding: 20px;
-                border-radius: 15px;
-                margin-top:10px;
-            ">
-                <p style="color:{muted_text_color};">{title}</p>
-                <h2>${value:.2f}</h2>
-                <span style="color:{signal_color}; font-weight:600;">
-                    {signal_text}
-                </span>
-            </div>
-            """, unsafe_allow_html=True)
-           
-# ---------- HEATMAP ----------
-
-with tab_heat:
-    data = []
-
-    for t in BIG_TECHS:
-
-        try:
-
-            d = yf.download(t, period="5d", progress=False)
-
-            close = d["Close"]
-
-            if isinstance(close, pd.DataFrame):
-                close = close.iloc[:, 0]
-
-            change = (close.iloc[-1] - close.iloc[0]) / close.iloc[0] * 100
-
-            data.append({"Ticker": t, "Change": float(change)})
-
-        except:
-            pass
-
-    hdf = pd.DataFrame(data)
-
-    fig = px.bar(
-        hdf, x="Ticker", y="Change",
-        color="Change", text="Change",
-        color_continuous_scale="RdYlGn"
+def build_price_chart(df, theme):
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.75, 0.25],
     )
 
+    fig.add_trace(
+        go.Candlestick(
+            x=df.index,
+            open=df["Open"],
+            high=df["High"],
+            low=df["Low"],
+            close=df["Close"],
+            increasing_line_color="#22c55e",
+            decreasing_line_color="#ef4444",
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["MA20"],
+            line=dict(color="#60a5fa", width=2),
+            name="MA20",
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Bar(
+            x=df.index,
+            y=df["Volume"],
+            marker_color="rgba(120,160,255,0.3)",
+        ),
+        row=2,
+        col=1,
+    )
+
+    fig.update_layout(
+        height=650,
+        hovermode="x unified",
+        dragmode="pan",
+        template=theme["plotly_template"],
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"color": theme["text_color"]},
+        xaxis=dict(rangeslider=dict(visible=True), type="date"),
+    )
+    fig.update_xaxes(tickfont=dict(color=theme["text_color"]), gridcolor=theme["grid_color"])
+    fig.update_yaxes(tickfont=dict(color=theme["text_color"]), gridcolor=theme["grid_color"])
+    return fig
+
+
+def build_heatmap_chart(heatmap_df, theme):
+    fig = px.bar(
+        heatmap_df,
+        x="Ticker",
+        y="Change",
+        color="Change",
+        text="Change",
+        color_continuous_scale="RdYlGn",
+    )
     fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
-    fig.update_layout(height=450, template=plotly_template, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                      font={'color': text_color})
+    fig.update_layout(
+        height=450,
+        template=theme["plotly_template"],
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"color": theme["text_color"]},
+    )
+    fig.update_xaxes(tickfont=dict(color=theme["text_color"]))
+    fig.update_yaxes(tickfont=dict(color=theme["text_color"]))
+    return fig
 
-    fig.update_xaxes(tickfont=dict(color=text_color))  
-    fig.update_yaxes(tickfont=dict(color=text_color))  
 
-    st.plotly_chart(fig, use_container_width=True)
+# ---------- UI Helpers: repeated cards and tab-specific render blocks ----------
 
-# ---------- NEWS ----------
+def render_value_card(title, value, signal_text, signal_color, theme):
+    st.markdown(
+        f"""
+        <div class="themed-card" style="padding: 20px; margin-top: 10px;">
+            <p style="color:{theme["muted_text_color"]};">{title}</p>
+            <h2>${value:.2f}</h2>
+            <span style="color:{signal_color}; font-weight:600;">{signal_text}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-with tab_news:
+
+def render_prediction_card(pred_price, current_price, theme):
+    signal_text, signal_color = get_signal_style(pred_price, current_price)
+    st.markdown(
+        f"""
+        <div class="themed-card" style="padding: 20px;">
+            <p style="color:{theme["muted_text_color"]};">Predicted Price</p>
+            <h2>${pred_price:.2f}</h2>
+            <span style="color:{signal_color}; font-weight:600;">{signal_text}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_signal_card(forecast_result):
+    signal_class = "signal-buy" if forecast_result["signal_text"] == "BUY" else "signal-sell"
+    arrow = "\u2191" if forecast_result["signal_text"] == "BUY" else "\u2193"
+
+    st.markdown(
+        f"""
+        <div class="signal-card" style="padding: 25px; margin-bottom: 10px;">
+            <div class="signal-card-title {signal_class}">{arrow} {forecast_result["signal_text"]}</div>
+            <div class="signal-card-meta">
+                Forecast for {forecast_result["predicted_date"]} |
+                {forecast_result["predicted_change_pct"]:+.2f}% vs current
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_news_tab(symbol, news_items):
     st.subheader(f"{symbol} News")
-
-    for n in news[:10]:
-        headline = n.get("headline", "No title")
-        url = n.get("url", "#")
-        summary = n.get("summary", "")
-        date = datetime.fromtimestamp(n.get("datetime", 0)).strftime("%Y-%m-%d")
-
+    for news_item in news_items[:10]:
+        headline = news_item.get("headline", "No title")
+        url = news_item.get("url", "#")
+        summary = news_item.get("summary", "")
+        date = datetime.fromtimestamp(news_item.get("datetime", 0)).strftime("%Y-%m-%d")
         st.markdown(f"**[{headline}]({url})**")
         st.write(summary)
         st.caption(date)
         st.divider()
 
-# ---------- ALMANAC ----------
+
+def render_almanac_tab(almanac):
+    st.header("Market Seasonality (Stock Trader's Almanac)")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("January Barometer", almanac["jan_signal"])
+    with col2:
+        st.metric("First Five Days", almanac["five_signal"])
+    with col3:
+        st.metric("Best Six Months", almanac["best6"])
+    st.subheader("Presidential Cycle")
+    st.info(almanac["pres"])
+
+
+def load_heatmap_data():
+    rows = []
+    for ticker in BIG_TECHS:
+        try:
+            data = yf.download(ticker, period="5d", progress=False)
+            close = coerce_series(data["Close"])
+            change = (close.iloc[-1] - close.iloc[0]) / close.iloc[0] * 100
+            rows.append({"Ticker": ticker, "Change": float(change)})
+        except Exception:
+            continue
+    return pd.DataFrame(rows)
+
+
+# ---------- Main Page: assemble sidebar, load data, and render dashboard ----------
+
+initialize_session_state()
+
+dark_mode = st.sidebar.toggle("Night Mode", value=True)
+theme = get_theme(dark_mode)
+apply_theme(theme)
+
+logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
+logo = Image.open(logo_path)
+
+logo_col, title_col = st.columns([1, 4])
+with logo_col:
+    st.image(logo, width=120)
+with title_col:
+    st.title("Lupa AI Stock Terminal")
+
+st.sidebar.text_input("Ticker", key="ticker", on_change=on_ticker_changed)
+st.sidebar.radio("Big Tech", BIG_TECHS, key="bigtech", on_change=on_bigtech_changed)
+period = st.sidebar.selectbox("Period", PERIOD_OPTIONS, index=2)
+
+symbol = st.session_state.ticker.upper()
+df = load_price_data(symbol, period)
+
+if df.empty:
+    st.error("Ticker not found")
+    st.stop()
+
+news = get_news(symbol)
+almanac = get_almanac_signals()
+
+price = df["Close"].iloc[-1]
+ret = df["Returns"].iloc[-1]
+trend = "Bullish" if price > df["MA20"].iloc[-1] else "Bearish"
+sentiment = 50 + ret * 100
+pred_price = price_forecast(df)
+
+news_summary = " | ".join(
+    news_item.get("headline", "")[:120]
+    for news_item in news[:5]
+    if news_item.get("headline")
+)
+if not news_summary:
+    news_summary = "No significant recent news."
+
+st.markdown(f"## {symbol} Market Overview")
+
+metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+with metric_col1:
+    st.metric("Price", f"${price:.2f}", f"{ret:.2%}")
+with metric_col2:
+    st.metric("Trend", trend)
+with metric_col3:
+    st.metric("Volatility", f"{df['Volatility'].iloc[-1]:.2%}")
+with metric_col4:
+    st.metric("RSI", f"{df['RSI'].iloc[-1]:.1f}")
+
+st.plotly_chart(build_sentiment_gauge(sentiment, theme), use_container_width=True)
+
+tab_chart, tab_ai, tab_almanac, tab_heat, tab_news = st.tabs(
+    ["Chart", "AI Forecast", "Almanac", "Heatmap", "News"]
+)
+
+with tab_chart:
+    st.plotly_chart(
+        build_price_chart(df, theme),
+        use_container_width=True,
+        config={"scrollZoom": True},
+    )
+
+with tab_ai:
+    left_col, right_col = st.columns(2)
+
+    with left_col:
+        st.subheader("XGBoost Prediction")
+        render_prediction_card(pred_price, price, theme)
+
+    llm_prompt = build_llm_prompt(symbol, price, trend, df, news_summary, almanac)
+    run_llm_clicked = False
+
+    with right_col:
+        st.markdown('<div style="height: 150px;"></div>', unsafe_allow_html=True)
+        _, button_col, _ = st.columns([1, 2, 1])
+        with button_col:
+            run_llm_clicked = st.button(
+                "Run LLM Analysis",
+                key="llm_button",
+                use_container_width=True,
+            )
+
+    if run_llm_clicked:
+        llm_text = run_llm(llm_prompt)
+        llm_price, llm_conf, llm_reason, llm_parse_error = parse_llm_response(llm_text, price)
+
+        if llm_parse_error is not None:
+            st.error("LLM parsing failed")
+            st.write(llm_parse_error)
+
+        st.session_state[FORECAST_STATE_KEY] = build_forecast_result(
+            current_price=price,
+            pred_price=pred_price,
+            llm_price=llm_price,
+            llm_conf=llm_conf,
+            llm_reason=llm_reason,
+        )
+
+    forecast_result = st.session_state.get(FORECAST_STATE_KEY)
+    if forecast_result:
+        st.markdown("### LLM Analysis")
+        st.markdown(
+            f"""
+            <div class="themed-card" style="
+                padding: 15px;
+                border-radius: 10px;
+                font-size: 15px;
+                line-height: 1.6;
+                margin-bottom: 10px;
+            ">
+                {forecast_result["llm_reason"]}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        render_signal_card(forecast_result)
+
+        for title, value in [
+            ("Ensemble Price", forecast_result["ensemble_price"]),
+            ("LLM Price", forecast_result["llm_price"]),
+            ("XGBoost Price", forecast_result["pred_price"]),
+        ]:
+            signal_text, signal_color = get_signal_style(value, price)
+            render_value_card(title, value, signal_text, signal_color, theme)
+
+with tab_heat:
+    heatmap_df = load_heatmap_data()
+    if not heatmap_df.empty:
+        st.plotly_chart(build_heatmap_chart(heatmap_df, theme), use_container_width=True)
+    else:
+        st.info("Heatmap data is temporarily unavailable.")
+
+with tab_news:
+    render_news_tab(symbol, news)
 
 with tab_almanac:
-    st.header("📅 Market Seasonality (Stock Trader's Almanac)")
-
-    col1, col2, col3 = st.columns(3)
-
-    st.metric("January Barometer", jan_signal)
-    st.metric("First Five Days", five_signal)
-    st.metric("Best Six Months", best6)
-
-    st.subheader("Presidential Cycle")
-    st.info(pres)
+    render_almanac_tab(almanac)
