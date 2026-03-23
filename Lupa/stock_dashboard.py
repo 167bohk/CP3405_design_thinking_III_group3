@@ -11,6 +11,7 @@ import finnhub
 from openai import OpenAI
 import os
 from xgboost import XGBRegressor
+import json
 
 # ---------- CONFIG ----------
 
@@ -403,6 +404,36 @@ def get_news(symbol):
 
 news = get_news(symbol)
 
+# ---------- ALMANAC DATA (GLOBAL) ----------
+
+spy = yf.download("SPY", period="2y", progress=False)
+jan = spy[spy.index.month == 1]
+
+# January Barometer
+if len(jan) > 5:
+    close = jan["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    jan_return = float((close.iloc[-1] / close.iloc[0]) - 1)
+    jan_signal = "Bullish" if jan_return > 0 else "Bearish"
+else:
+    jan_signal = "Neutral"
+
+# First Five Days
+jan5 = jan.head(5)
+
+if len(jan5) == 5:
+    close = jan5["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    jan5_return = float((close.iloc[-1] / close.iloc[0]) - 1)
+    five_signal = "Bullish" if jan5_return > 0 else "Bearish"
+else:
+    five_signal = "Neutral"
+
+# Best Six Months
+best6 = best_six_months()
+
 # ---------- NEWS SUMMARY (FOR LLM) ----------
 
 news_summary = " | ".join(
@@ -411,6 +442,28 @@ news_summary = " | ".join(
 
 if not news_summary:
     news_summary = "No significant recent news."
+    
+# ---------- GET ALMANAC SCORE ----------
+def get_almanac_score(jan_signal, five_signal, best6):
+
+    score = 0
+
+    if jan_signal == "Bullish":
+        score += 1
+    elif jan_signal == "Bearish":
+        score -= 1
+
+    if five_signal == "Bullish":
+        score += 1
+    elif five_signal == "Bearish":
+        score -= 1
+
+    if best6 == "Bullish Season":
+        score += 1
+    else:
+        score -= 1
+
+    return score / 3  # normalize to [-1, 1]
     
 # ---------- AI ----------
 
@@ -438,7 +491,7 @@ with tab_ai:
 
         [DATA]
         Stock: {symbol}
-        Price: {price}
+        Current Price: {price}
         RSI: {df['RSI'].iloc[-1]:.2f}
         Volatility: {df['Volatility'].iloc[-1]:.2%}
         Trend (MA20): {trend}
@@ -447,15 +500,21 @@ with tab_ai:
         {news_summary}
 
         [INSTRUCTIONS]
-        1. Predict SHORT-TERM direction (1-5 days): ONLY "bullish" OR "bearish"
-        2. Combine:
-        - Technical indicators
-        - News sentiment from headlines
-        3. Be decisive. No uncertainty.
+        1. Predict SHORT-TERM (1-5 days)
+        2. Provide:
+        - signal: bullish OR bearish
+        - target_price: realistic price (within ±10%)
+        - confidence: 0 to 1
+        3. Use technicals + news sentiment
+        4. Be decisive
 
-        [OUTPUT FORMAT]
-        Signal: bullish OR bearish
-        Reason: <max 2 sentences>
+        [OUTPUT FORMAT - JSON ONLY]
+        {{
+        "signal": "bullish",
+        "target_price": 210.5,
+        "confidence": 0.72,
+        "reason": "max 10 sentences"
+        }}
         """
 
         if st.button("Run LLM Analysis", key="llm_button"):
@@ -464,7 +523,19 @@ with tab_ai:
 
             st.write(llm_text)
 
-            llm_signal = "bullish" if "signal: bullish" in llm_text.lower() else "bearish"
+            try:
+                llm_data = json.loads(llm_text)
+                
+                llm_signal = llm_data.get("signal", "bearish")
+                llm_price = float(llm_data.get("target_price", price))
+                llm_conf = float(llm_data.get("confidence", 0.5))
+
+            except:
+                llm_signal = "bullish" if pred_price > price else "bearish"
+                llm_price = price
+                llm_conf = 0.5
+                
+                
             model_signal = "bullish" if pred_price > price else "bearish"
             trend_signal = "bullish" if trend == "Bullish" else "bearish"
 
@@ -472,54 +543,37 @@ with tab_ai:
             season_signal = "bullish" if best6 == "Bullish Season" else "neutral"
 
             # ---------- WEIGHTED VOTING ----------
+            
+            llm_conf = min(max(llm_conf, 0.2), 0.8)
 
-            weights = {
-                "llm": 0.4,
-                "model": 0.4,
-                "trend": 0.2
-            }
+            almanac_score = get_almanac_score(jan_signal, five_signal, best6)
 
-            score = 0
+            ensemble_price = (
+                pred_price * (1 - llm_conf) +
+                llm_price * llm_conf
+            )
+            
+            ensemble_price *= (1 + 0.015 * almanac_score)
 
-            score += weights["llm"] * (1 if llm_signal == "bullish" else -1)
-            score += weights["model"] * (1 if model_signal == "bullish" else -1)
-            score += weights["trend"] * (1 if trend_signal == "bullish" else -1)
-
-            # ---------- PRIMARY DECISION ----------
-
-            if score > 0:
-                final_signal = "BUY"
-            elif score < 0:
-                final_signal = "SELL"
-            else:
-                final_signal = "HOLD"
-                
-            # ---------- TIE BREAKER (SEASONALITY) ----------
-
-            if final_signal == "HOLD" and season_signal != "neutral":
-
-                if season_signal == "bullish":
-                    final_signal = "BUY (Seasonality Tie-Break)"
-                else:
-                    final_signal = "SELL (Seasonality Tie-Break)"
-                    
+            score = (ensemble_price / price - 1)
             confidence = abs(score)
 
             st.subheader("AI Trading Signal")
 
-            st.write(f"""
-            Trend: **{trend_signal.upper()}**
+            st.metric(
+            "Ensemble Price",
+            f"${ensemble_price:.2f}",
+            f"{(ensemble_price/price - 1):.2%}")
 
-            XGBoost: **{model_signal.upper()}**
+            st.metric(
+                "LLM Price",
+                f"${llm_price:.2f}"
+            )
 
-            LLM: **{llm_signal.upper()}**
-
-            Seasonality (Tie-break): **{best6}**
-
-            Signal: **{final_signal}**
-
-            Confidence: **{confidence:.0%}**
-            """)
+            st.metric(
+                "XGB Price",
+                f"${pred_price:.2f}"
+            )
 
 # ---------- HEATMAP ----------
 
@@ -584,72 +638,9 @@ with tab_almanac:
 
     col1, col2, col3 = st.columns(3)
 
-    # ---------- January Barometer ----------
-
-    spy = yf.download("SPY", period="2y", progress=False)
-
-    jan = spy[spy.index.month == 1]
-
-    if len(jan) > 5:
-
-        close = jan["Close"]
-
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:, 0]
-
-        jan_return = float((close.iloc[-1] / close.iloc[0]) - 1)
-
-        jan_signal = "Bullish" if jan_return > 0 else "Bearish"
-
-    else:
-
-        jan_signal = "Waiting for January"
-
-    # ---------- First Five Days ----------
-
-    jan5 = jan.head(5)
-
-    if len(jan5) == 5:
-
-        close = jan5["Close"]
-
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:, 0]
-
-        jan5_return = float((close.iloc[-1] / close.iloc[0]) - 1)
-
-        five_signal = "Bullish" if jan5_return > 0 else "Bearish"
-
-    else:
-
-        five_signal = "Not available"
-
-    # ---------- Best Six Months ----------
-
-    best6 = best_six_months()
-
-    with col1:
-
-        st.metric(
-            "January Barometer",
-            jan_signal
-        )
-
-    with col2:
-
-        st.metric(
-            "First Five Days",
-            five_signal
-        )
-
-    with col3:
-
-        st.metric(
-            "Best Six Months",
-            best6
-        )
-
-    st.divider()
+    st.metric("January Barometer", jan_signal)
+    st.metric("First Five Days", five_signal)
+    st.metric("Best Six Months", best6)
 
     # ---------- Presidential Cycle ----------
 
