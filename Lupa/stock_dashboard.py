@@ -375,7 +375,8 @@ def price_forecast(df, window=20):
 def run_llm(prompt):
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"}
     )
 
     return response.choices[0].message.content
@@ -543,14 +544,27 @@ with tab_ai:
         try:
             llm_data = json.loads(llm_text)
 
-            llm_reason = llm_data.get("reason", "")[:2000]
-            llm_price = float(llm_data.get("target_price", price))
-            llm_conf = float(llm_data.get("confidence", 0.5))
+            llm_price = llm_data.get("target_price", price)
+            llm_conf = llm_data.get("confidence", 0.5)
+            llm_reason = llm_data.get("reason", "")
 
-        except:
-            llm_reason = "No analysis available"
+            llm_price = float(llm_price) if llm_price else price
+            llm_conf = float(llm_conf) if llm_conf else 0.5
+
+            llm_conf = min(max(llm_conf, 0), 1)
+
+            if not llm_reason:
+                llm_reason = "No reasoning provided"
+
+            llm_reason = llm_reason[:2000]
+
+        except Exception as e:
+            st.error("LLM parsing failed")
+            st.write(llm_text)
+
             llm_price = price
             llm_conf = 0.5
+            llm_reason = "No analysis available"
 
         # ---------- ENSEMBLE ----------
         llm_conf = min(max(llm_conf, 0.2), 0.8)
