@@ -536,8 +536,6 @@ with tab_ai:
                 llm_price * llm_conf
             )
 
-            score = (ensemble_price / price - 1)
-            confidence = abs(score)
 
             st.subheader("AI Trading Signal")
 
@@ -555,9 +553,7 @@ with tab_ai:
                 <h2 style="color:{signal_color}; margin-bottom:10px;">
                     {signal_text}
                 </h2>
-                <p style="font-size:18px; color:gray;">
-                    Confidence: {confidence:.1%}
-                </p>
+                
             </div>
             """, unsafe_allow_html=True)
             # ---------- ENSEMBLE CARD ----------
