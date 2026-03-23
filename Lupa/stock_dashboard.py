@@ -563,16 +563,19 @@ with tab_heat:
 
 # ---------- NEWS ----------
 
-for n in news[:10]:
-    headline = n.get("headline", "No title")
-    url = n.get("url", "#")
-    summary = n.get("summary", "")
-    date = datetime.fromtimestamp(n.get("datetime", 0)).strftime("%Y-%m-%d")
+with tab_news:
+    st.subheader(f"{symbol} News")
 
-    st.markdown(f"**[{headline}]({url})**")
-    st.write(summary)
-    st.caption(date)
-    st.divider()
+    for n in news[:10]:
+        headline = n.get("headline", "No title")
+        url = n.get("url", "#")
+        summary = n.get("summary", "")
+        date = datetime.fromtimestamp(n.get("datetime", 0)).strftime("%Y-%m-%d")
+
+        st.markdown(f"**[{headline}]({url})**")
+        st.write(summary)
+        st.caption(date)
+        st.divider()
 
 # ---------- ALMANAC ----------
 
