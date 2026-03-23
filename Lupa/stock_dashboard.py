@@ -115,6 +115,31 @@ button[data-baseweb="tab"] div {{
     -webkit-text-fill-color: {text_color} !important;
 }}
 
+.themed-card {{
+    background: {card_bg};
+    border: {card_border};
+    border-radius: 15px;
+}}
+
+.signal-card {{
+    background: {card_bg};
+    border: {card_border};
+    border-radius: 15px;
+    text-align: center;
+}}
+
+.signal-card-title {{
+    margin: 0;
+}}
+
+.signal-buy {{
+    color: #22c55e !important;
+}}
+
+.signal-sell {{
+    color: #ef4444 !important;
+}}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -629,9 +654,7 @@ with tab_ai:
         st.markdown("### 🧠 LLM Analysis")
 
         st.markdown(f"""
-        <div style="
-            background: {card_bg};
-            border: {card_border};
+        <div class="themed-card" style="
             padding: 15px;
             border-radius: 10px;
             font-size: 15px;
@@ -644,19 +667,15 @@ with tab_ai:
 
         # ---------- SIGNAL ----------
         signal_text = "BUY" if ensemble_price > price else "SELL"
-        signal_color = "#22c55e" if signal_text == "BUY" else "#ef4444"
+        signal_class = "signal-buy" if signal_text == "BUY" else "signal-sell"
         arrow = "↑" if signal_text == "BUY" else "↓"
 
         st.markdown(f"""
-        <div style="
-            background: {card_bg};
-            border: {card_border};
+        <div class="signal-card" style="
             padding: 25px;
-            border-radius: 15px;
-            text-align: center;
             margin-bottom:10px;
         ">
-            <h2 style="color:{signal_color};">{arrow} {signal_text}</h2>
+            <h2 class="signal-card-title {signal_class}">{arrow} {signal_text}</h2>
         </div>
         """, unsafe_allow_html=True)
 
