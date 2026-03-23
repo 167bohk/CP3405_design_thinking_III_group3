@@ -44,6 +44,8 @@ if dark_mode:
     text_color = "#ffffff"
     muted_text_color = "#ffffff"
     metric_bg = "rgba(255,255,255,0.05)"
+    card_bg = "rgba(255,255,255,0.06)"
+    card_border = "1px solid rgba(255,255,255,0.10)"
     plotly_template = "plotly_dark"
     grid_color = "rgba(255,255,255,0.1)"
 else:
@@ -52,6 +54,8 @@ else:
     text_color = "#000000"
     muted_text_color = "#000000"
     metric_bg = "#ffffff"
+    card_bg = "rgba(255,255,255,0.92)"
+    card_border = "1px solid rgba(15,23,42,0.08)"
     plotly_template = "plotly_white"
     grid_color = "rgba(0,0,0,0.1)"
 
@@ -514,7 +518,8 @@ with tab_ai:
 
         st.markdown(f"""
         <div style="
-            background: rgba(255,255,255,0.05);
+            background: {card_bg};
+            border: {card_border};
             padding: 20px;
             border-radius: 15px;
         ">
@@ -625,10 +630,10 @@ with tab_ai:
 
         st.markdown(f"""
         <div style="
-            background: rgba(255,255,255,0.04);
+            background: {card_bg};
+            border: {card_border};
             padding: 15px;
             border-radius: 10px;
-            border: 1px solid rgba(255,255,255,0.08);
             font-size: 15px;
             line-height: 1.6;
             margin-bottom:10px;
@@ -644,14 +649,14 @@ with tab_ai:
 
         st.markdown(f"""
         <div style="
-            background: rgba(255,255,255,0.05);
+            background: {card_bg};
+            border: {card_border};
             padding: 25px;
             border-radius: 15px;
             text-align: center;
             margin-bottom:10px;
         ">
             <h2 style="color:{signal_color};">{arrow} {signal_text}</h2>
-            <p style="color:{muted_text_color};">Confidence: {llm_conf:.0%}</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -666,7 +671,8 @@ with tab_ai:
 
             st.markdown(f"""
             <div style="
-                background: rgba(255,255,255,0.05);
+                background: {card_bg};
+                border: {card_border};
                 padding: 20px;
                 border-radius: 15px;
                 margin-top:10px;
