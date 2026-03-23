@@ -578,6 +578,7 @@ def build_sentiment_gauge(sentiment, theme):
         go.Indicator(
             mode="gauge+number",
             value=sentiment,
+            domain={"x": [0, 1], "y": [0, 1]},
             title={"text": "Market Sentiment", "font": {"color": theme["text_color"]}},
             gauge={
                 "axis": {
@@ -596,6 +597,10 @@ def build_sentiment_gauge(sentiment, theme):
     )
     fig.update_layout(
         template=theme["plotly_template"],
+        autosize=False,
+        width=760,
+        height=420,
+        margin={"l": 40, "r": 40, "t": 60, "b": 20},
         paper_bgcolor="rgba(0,0,0,0)",
         font={"color": theme["text_color"]},
     )
@@ -754,7 +759,7 @@ def render_news_tab(symbol, news_items, scored_news):
             st.caption(
                 f'FinBERT: {sentiment["label"].title()} | compound {sentiment["compound"]:+.2f}'
             )
-        st.write(summary)
+        st.text(summary)
         st.caption(date)
         st.divider()
 
@@ -850,7 +855,7 @@ with metric_col4:
 
 sentiment_left, sentiment_center, sentiment_right = st.columns([1, 2, 1])
 with sentiment_center:
-    st.plotly_chart(build_sentiment_gauge(sentiment, theme), use_container_width=True)
+    st.plotly_chart(build_sentiment_gauge(sentiment, theme), use_container_width=False)
     with st.expander("How Market Sentiment Is Calculated"):
         st.markdown(
             f"""
