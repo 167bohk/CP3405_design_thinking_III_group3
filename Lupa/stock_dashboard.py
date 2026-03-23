@@ -511,7 +511,7 @@ with tab_ai:
         try:
             llm_data = json.loads(llm_text)
 
-            llm_reason = llm_data.get("reason", "")[:200]
+            llm_reason = llm_data.get("reason", "")[:2000]
             llm_price = float(llm_data.get("target_price", price))
             llm_conf = float(llm_data.get("confidence", 0.5))
 
