@@ -542,74 +542,74 @@ with tab_ai:
         }}
         """
 
-    # ---------- BUTTON ----------
-    if run_clicked:
+        # ---------- BUTTON ----------
+        if run_clicked:
 
-        llm_text = run_llm(prompt)
+            llm_text = run_llm(prompt)
 
-        try:
-            llm_data = json.loads(llm_text)
+            try:
+                llm_data = json.loads(llm_text)
 
-            llm_price = llm_data.get("target_price", price)
-            llm_conf = llm_data.get("confidence", 0.5)
-            llm_reason = llm_data.get("reason", "")
+                llm_price = llm_data.get("target_price", price)
+                llm_conf = llm_data.get("confidence", 0.5)
+                llm_reason = llm_data.get("reason", "")
 
-            llm_price = float(llm_price) if llm_price else price
-            llm_conf = float(llm_conf) if llm_conf else 0.5
+                llm_price = float(llm_price) if llm_price else price
+                llm_conf = float(llm_conf) if llm_conf else 0.5
 
-            llm_conf = min(max(llm_conf, 0), 1)
+                llm_conf = min(max(llm_conf, 0), 1)
 
-            if not llm_reason:
-                llm_reason = "No reasoning provided"
+                if not llm_reason:
+                    llm_reason = "No reasoning provided"
 
-            llm_reason = llm_reason[:2000]
+                llm_reason = llm_reason[:2000]
 
-        except Exception as e:
-            st.error("LLM parsing failed")
-            st.write(llm_text)
+            except Exception as e:
+                st.error("LLM parsing failed")
+                st.write(llm_text)
 
-            llm_price = price
-            llm_conf = 0.5
-            llm_reason = "No analysis available"
+                llm_price = price
+                llm_conf = 0.5
+                llm_reason = "No analysis available"
 
-        # ---------- ENSEMBLE ----------
-        llm_conf = min(max(llm_conf, 0.2), 0.8)
+            # ---------- ENSEMBLE ----------
+            llm_conf = min(max(llm_conf, 0.2), 0.8)
 
-        ensemble_price = (
-            pred_price * (1 - llm_conf) +
-            llm_price * llm_conf
-        )
-        st.session_state.ensemble_price = ensemble_price
-        st.session_state.llm_price = llm_price
-        st.session_state.pred_price = pred_price
-        st.session_state.llm_reason = llm_reason
-        st.session_state.llm_conf = llm_conf
+            ensemble_price = (
+                pred_price * (1 - llm_conf) +
+                llm_price * llm_conf
+            )
+            st.session_state.ensemble_price = ensemble_price
+            st.session_state.llm_price = llm_price
+            st.session_state.pred_price = pred_price
+            st.session_state.llm_reason = llm_reason
+            st.session_state.llm_conf = llm_conf
 
-    # ---------- UI ----------
-    if "ensemble_price" in st.session_state:
+        # ---------- UI ----------
+        if "ensemble_price" in st.session_state:
 
-        ensemble_price = st.session_state.ensemble_price
-        llm_price = st.session_state.llm_price
-        pred_price = st.session_state.pred_price
-        llm_reason = st.session_state.llm_reason
-        llm_conf = st.session_state.llm_conf
+            ensemble_price = st.session_state.ensemble_price
+            llm_price = st.session_state.llm_price
+            pred_price = st.session_state.pred_price
+            llm_reason = st.session_state.llm_reason
+            llm_conf = st.session_state.llm_conf
 
-        # ---------- REASON ----------
-        st.markdown("### 🧠 LLM Analysis")
+            # ---------- REASON ----------
+            st.markdown("### 🧠 LLM Analysis")
 
-        st.markdown(f"""
-        <div style="
-            background: rgba(255,255,255,0.04);
-            padding: 15px;
-            border-radius: 10px;
-            border: 1px solid rgba(255,255,255,0.08);
-            font-size: 15px;
-            line-height: 1.6;
-            margin-bottom:10px;
-        ">
-        {llm_reason}
-        </div>
-        """, unsafe_allow_html=True)
+            st.markdown(f"""
+            <div style="
+                background: rgba(255,255,255,0.04);
+                padding: 15px;
+                border-radius: 10px;
+                border: 1px solid rgba(255,255,255,0.08);
+                font-size: 15px;
+                line-height: 1.6;
+                margin-bottom:10px;
+            ">
+            {llm_reason}
+            </div>
+            """, unsafe_allow_html=True)
 
         # ---------- SIGNAL ----------
         signal_text = "BUY" if ensemble_price > price else "SELL"
