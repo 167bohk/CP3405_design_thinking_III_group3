@@ -50,6 +50,8 @@ def get_theme(is_dark_mode):
             "metric_bg": "rgba(255,255,255,0.05)",
             "card_bg": "rgba(255,255,255,0.06)",
             "card_border": "1px solid rgba(255,255,255,0.10)",
+            "input_bg": "#0f172a",
+            "input_border": "1px solid rgba(255,255,255,0.12)",
             "plotly_template": "plotly_dark",
             "grid_color": "rgba(255,255,255,0.10)",
         }
@@ -65,6 +67,8 @@ def get_theme(is_dark_mode):
         "metric_bg": "#ffffff",
         "card_bg": "rgba(255,255,255,0.92)",
         "card_border": "1px solid rgba(15,23,42,0.08)",
+        "input_bg": "#ffffff",
+        "input_border": "1px solid rgba(15,23,42,0.16)",
         "plotly_template": "plotly_white",
         "grid_color": "rgba(0,0,0,0.10)",
     }
@@ -112,6 +116,16 @@ def apply_theme(theme):
         .stTextInput input,
         .stSelectbox div[data-baseweb="select"] > div,
         .stSelectbox input {{
+            background: {theme["input_bg"]} !important;
+            border: {theme["input_border"]} !important;
+            color: {theme["text_color"]} !important;
+            -webkit-text-fill-color: {theme["text_color"]} !important;
+        }}
+
+        [data-testid="stSidebar"] .stTextInput input,
+        [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div,
+        [data-testid="stSidebar"] .stSelectbox input {{
+            background: {theme["input_bg"]} !important;
             color: {theme["text_color"]} !important;
             -webkit-text-fill-color: {theme["text_color"]} !important;
         }}
