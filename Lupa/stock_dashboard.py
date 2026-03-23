@@ -692,13 +692,14 @@ def build_heatmap_chart(heatmap_df, theme):
 
 # ---------- UI Helpers: repeated cards and tab-specific render blocks ----------
 
-def render_value_card(title, value, signal_text, signal_color, theme):
+def render_value_card(title, value, signal_text, signal_color, theme, extra_text=None):
     st.markdown(
         f"""
         <div class="themed-card" style="padding: 20px; margin-top: 10px;">
             <p style="color:{theme["muted_text_color"]};">{title}</p>
             <h2>${value:.2f}</h2>
             <span style="color:{signal_color}; font-weight:600;">{signal_text}</span>
+            {f'<p style="color:{theme["muted_text_color"]}; margin-top: 10px;">{extra_text}</p>' if extra_text else ""}
         </div>
         """,
         unsafe_allow_html=True,
@@ -850,6 +851,30 @@ with metric_col4:
 sentiment_left, sentiment_center, sentiment_right = st.columns([1, 2, 1])
 with sentiment_center:
     st.plotly_chart(build_sentiment_gauge(sentiment, theme), use_container_width=True)
+    with st.expander("How Market Sentiment Is Calculated"):
+        st.markdown(
+            f"""
+            `Market Sentiment` is a composite 0-100 score:
+
+            - `70%` Technical sentiment
+            - `30%` FinBERT news sentiment
+
+            Current breakdown:
+
+            - Technical sentiment: `{technical_sentiment:.1f}`
+            - News sentiment: `{news_sentiment:.1f}`
+            - Final score: `{sentiment:.1f}`
+
+            Technical sentiment is derived from:
+            - Price vs `MA20`
+            - `RSI`
+            - `MACD` vs signal line
+            - 5-day return
+            - Volume momentum
+
+            News sentiment is derived from recent headlines scored by `FinBERT`.
+            """
+        )
 
 tab_chart, tab_ai, tab_almanac, tab_heat, tab_news = st.tabs(
     ["Chart", "AI Forecast", "Almanac", "Heatmap", "News"]
@@ -932,7 +957,10 @@ with tab_ai:
             ("XGBoost Price", forecast_result["pred_price"]),
         ]:
             signal_text, signal_color = get_signal_style(value, price)
-            render_value_card(title, value, signal_text, signal_color, theme)
+            extra_text = None
+            if title == "LLM Price":
+                extra_text = f'Confidence: {forecast_result["llm_conf"]:.0%}'
+            render_value_card(title, value, signal_text, signal_color, theme, extra_text=extra_text)
 
 with tab_heat:
     heatmap_df = load_heatmap_data()
