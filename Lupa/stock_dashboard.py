@@ -361,9 +361,18 @@ def has_enough_memory_for_finbert(min_available_mb=FINBERT_MIN_AVAILABLE_MB):
 
 # ---------- Data Layer: market history, news, and seasonality inputs ----------
 
-@st.cache_data(ttl=900)
+@st.cache_data(ttl=180)
 def download_single_ticker_history(symbol, period):
-    return yf.download(symbol, period=period, progress=False, auto_adjust=False)
+    df = yf.download(symbol, period=period, progress=False, auto_adjust=False)
+
+    if not df.empty:
+        return df
+
+    try:
+        fallback_df = yf.Ticker(symbol).history(period=period, auto_adjust=False)
+        return fallback_df
+    except Exception:
+        return df
 
 
 @st.cache_data(ttl=900)
@@ -1103,6 +1112,8 @@ with tab_ai:
 
     forecast_result = st.session_state.get(FORECAST_STATE_KEY)
     if forecast_result:
+        forecast_result.setdefault("reference_close_date", "last completed")
+        forecast_result.setdefault("predicted_label", "")
         st.markdown("### LLM Analysis")
         st.markdown(
             f"""
