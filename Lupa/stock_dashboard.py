@@ -506,8 +506,7 @@ def score_news_with_finbert(headlines):
             {
                 "headline": stripped,
                 "label": sentiment["label"],
-                "compound": sentiment["compound"],
-                "scores": sentiment["scores"],
+                "compound": float(sentiment["compound"]),
             }
         )
 
@@ -698,6 +697,7 @@ def build_forecast_result(current_price, pred_price, llm_price, llm_conf, llm_re
         "llm_conf": llm_conf,
         "signal_text": "BUY" if ensemble_price > current_price else "SELL",
         "predicted_change_pct": ((ensemble_price - current_price) / current_price) * 100,
+        "reference_close_date": target_context["latest_date"].strftime("%Y-%m-%d"),
         "predicted_date": target_context["target_date"].strftime("%Y-%m-%d"),
         "predicted_label": target_context["target_label"],
     }
@@ -867,7 +867,7 @@ def render_signal_card(forecast_result):
             <div class="signal-card-title {signal_class}">{arrow} {forecast_result["signal_text"]}</div>
             <div class="signal-card-meta">
                 Forecast for {forecast_result["predicted_date"]} |
-                {forecast_result["predicted_change_pct"]:+.2f}% vs current
+                {forecast_result["predicted_change_pct"]:+.2f}% vs {forecast_result["reference_close_date"]} close
             </div>
             <div class="signal-card-meta">{forecast_result["predicted_label"]}</div>
         </div>
