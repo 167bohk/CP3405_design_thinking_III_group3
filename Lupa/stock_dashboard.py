@@ -592,6 +592,33 @@ def build_news_sentiment_summary(scored_news):
     return f"{overall_label} ({average_compound:+.2f} compound from recent headlines)"
 
 
+def build_prompt_news_summary(news_items, scored_news):
+    headlines = []
+
+    latest_headline = next((item.get("headline", "").strip() for item in news_items if item.get("headline")), "")
+    if latest_headline:
+        headlines.append(latest_headline[:120])
+
+    if scored_news:
+        strongest_item = max(scored_news, key=lambda item: abs(item["compound"]))
+        strongest_headline = strongest_item["headline"].strip()
+        if strongest_headline and strongest_headline != latest_headline:
+            headlines.append(strongest_headline[:120])
+    else:
+        fallback_headline = next(
+            (
+                item.get("headline", "").strip()
+                for item in news_items[1:]
+                if item.get("headline") and item.get("headline").strip() != latest_headline
+            ),
+            "",
+        )
+        if fallback_headline:
+            headlines.append(fallback_headline[:120])
+
+    return " | ".join(headlines) if headlines else "No significant recent news."
+
+
 # ---------- Forecasting: XGBoost model, LLM prompt, and ensemble output ----------
 
 def train_model(X, y):
@@ -643,19 +670,19 @@ def price_forecast(df, window=20):
 
 
 def build_llm_prompt(symbol, price, trend, df, news_summary, news_sentiment_summary, almanac, target_context):
-    latest_date = target_context["latest_date"]
+    reference_close_date = target_context["latest_date"]
     target_date = target_context["target_date"]
-    target_label = target_context["target_label"]
+    market_status = target_context["target_label"]
 
     return f"""
     You are a professional quantitative hedge fund analyst.
 
     [DATA]
     Stock: {symbol}
-    Latest trading date: {latest_date}
-    Current Close Price: {price}
-
-    Target prediction date: {target_date} ({target_label})
+    Reference close date: {reference_close_date}
+    Reference close price: {price}
+    Target close date: {target_date}
+    US market status: {market_status}
 
     RSI: {df['RSI'].iloc[-1]:.2f}
     Volatility: {df['Volatility'].iloc[-1]:.2%}
@@ -677,8 +704,9 @@ def build_llm_prompt(symbol, price, trend, df, news_summary, news_sentiment_summ
 
     1. Predict the CLOSE price for the target US trading session.
 
-    - Latest trading date: {latest_date}
-    - Target prediction date: {target_date}
+    - Reference close date: {reference_close_date}
+    - Reference close price: {price}
+    - Target close date: {target_date}
     - target_price MUST be the closing price of the target date
 
     2. Provide:
@@ -1015,15 +1043,8 @@ sentiment = 0.7 * technical_sentiment + 0.3 * news_sentiment
 pred_price = price_forecast(df)
 target_context = get_prediction_target_context(df.index[-1])
 
-news_summary = " | ".join(
-    news_item.get("headline", "")[:120]
-    for news_item in news[:5]
-    if news_item.get("headline")
-)
-if not news_summary:
-    news_summary = "No significant recent news."
-
 news_sentiment_summary = build_news_sentiment_summary(scored_news)
+news_summary = build_prompt_news_summary(news, scored_news)
 
 st.markdown(f"## {symbol} Market Overview")
 
