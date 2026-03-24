@@ -49,6 +49,7 @@ PERIOD_OPTIONS = ["3mo", "6mo", "1y", "2y", "5y"]
 FORECAST_STATE_KEY = "forecast_result"
 US_MARKET_TZ = ZoneInfo("America/New_York")
 FINBERT_MIN_AVAILABLE_MB = 900
+MARKET_CLOSE_STABILIZATION_HOURS = 2
 
 
 # ---------- Theme: light/dark colors and global CSS ----------
@@ -281,6 +282,12 @@ def format_time_delta(delta):
     return f"{hours}h {minutes}m"
 
 
+def has_stable_completed_close(market_now):
+    market_close = market_now.replace(hour=16, minute=0, second=0, microsecond=0)
+    stable_after = market_close + timedelta(hours=MARKET_CLOSE_STABILIZATION_HOURS)
+    return market_now >= stable_after
+
+
 def get_prediction_target_context(latest_trading_timestamp):
     latest_date = pd.Timestamp(latest_trading_timestamp).date()
     market_now = datetime.now(US_MARKET_TZ)
@@ -288,6 +295,7 @@ def get_prediction_target_context(latest_trading_timestamp):
     market_open = market_now.replace(hour=9, minute=30, second=0, microsecond=0)
     market_close = market_now.replace(hour=16, minute=0, second=0, microsecond=0)
     market_is_open_day = market_date.weekday() < 5
+    stable_completed_close = has_stable_completed_close(market_now)
 
     if market_is_open_day and market_open <= market_now < market_close:
         target_date = market_date if market_date > latest_date else latest_date
@@ -295,6 +303,10 @@ def get_prediction_target_context(latest_trading_timestamp):
     elif market_is_open_day and market_now < market_open:
         target_date = market_date if market_date > latest_date else latest_date
         target_label = f"US market not open yet; opens in {format_time_delta(market_open - market_now)}"
+    elif market_is_open_day and not stable_completed_close:
+        target_date = market_date if market_date > latest_date else latest_date
+        stable_after = market_close + timedelta(hours=MARKET_CLOSE_STABILIZATION_HOURS)
+        target_label = f"US market closed; waiting {format_time_delta(stable_after - market_now)} for stable close data"
     else:
         reference_date = market_date if market_date > latest_date else latest_date
         target_date = get_next_trading_day(reference_date)
@@ -315,10 +327,10 @@ def keep_completed_market_data(df):
 
     market_now = datetime.now(US_MARKET_TZ)
     market_date = market_now.date()
-    market_close = market_now.replace(hour=16, minute=0, second=0, microsecond=0)
     last_row_date = pd.Timestamp(df.index[-1]).date()
+    stable_completed_close = has_stable_completed_close(market_now)
 
-    if market_date.weekday() < 5 and market_now < market_close and last_row_date == market_date:
+    if market_date.weekday() < 5 and not stable_completed_close and last_row_date == market_date:
         completed_df = df.iloc[:-1]
         if not completed_df.empty:
             return completed_df
