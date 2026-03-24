@@ -249,20 +249,51 @@ def get_next_trading_day(base_date):
     return next_day
 
 
+def get_next_market_open(reference_time):
+    candidate_date = reference_time.date()
+
+    if reference_time.weekday() >= 5:
+        while candidate_date.weekday() >= 5:
+            candidate_date += timedelta(days=1)
+    elif reference_time.time() >= datetime.min.replace(hour=16).time():
+        candidate_date = get_next_trading_day(candidate_date)
+
+    return datetime(
+        candidate_date.year,
+        candidate_date.month,
+        candidate_date.day,
+        9,
+        30,
+        tzinfo=US_MARKET_TZ,
+    )
+
+
+def format_time_delta(delta):
+    total_seconds = max(int(delta.total_seconds()), 0)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes = remainder // 60
+    return f"{hours}h {minutes}m"
+
+
 def get_prediction_target_context(latest_trading_timestamp):
     latest_date = pd.Timestamp(latest_trading_timestamp).date()
     market_now = datetime.now(US_MARKET_TZ)
     market_date = market_now.date()
+    market_open = market_now.replace(hour=9, minute=30, second=0, microsecond=0)
     market_close = market_now.replace(hour=16, minute=0, second=0, microsecond=0)
     market_is_open_day = market_date.weekday() < 5
 
-    if market_is_open_day and market_now < market_close:
+    if market_is_open_day and market_open <= market_now < market_close:
         target_date = market_date if market_date > latest_date else latest_date
-        target_label = "current US trading day close (market not closed yet)"
+        target_label = f"US market open; closes in {format_time_delta(market_close - market_now)}"
+    elif market_is_open_day and market_now < market_open:
+        target_date = market_date if market_date > latest_date else latest_date
+        target_label = f"US market not open yet; opens in {format_time_delta(market_open - market_now)}"
     else:
         reference_date = market_date if market_date > latest_date else latest_date
         target_date = get_next_trading_day(reference_date)
-        target_label = "next US trading day close"
+        next_open = get_next_market_open(market_now)
+        target_label = f"US market closed; next session opens in {format_time_delta(next_open - market_now)}"
 
     return {
         "latest_date": latest_date,
@@ -282,7 +313,7 @@ def keep_completed_market_data(df):
     last_row_date = pd.Timestamp(df.index[-1]).date()
 
     if market_date.weekday() < 5 and market_now < market_close and last_row_date == market_date:
-        completed_df = df.iloc[:-1].copy()
+        completed_df = df.iloc[:-1]
         if not completed_df.empty:
             return completed_df
 
@@ -316,10 +347,19 @@ def render_app_header(logo_path, title, theme):
 
 # ---------- Data Layer: market history, news, and seasonality inputs ----------
 
-@st.cache_data
+@st.cache_data(ttl=900)
+def download_single_ticker_history(symbol, period):
+    return yf.download(symbol, period=period, progress=False, auto_adjust=False)
+
+
+@st.cache_data(ttl=900)
+def download_multi_ticker_history(tickers, period):
+    return yf.download(list(tickers), period=period, progress=False, auto_adjust=False, group_by="ticker")
+
+
+@st.cache_data(ttl=900)
 def load_price_data(symbol, period):
-    stock = yf.Ticker(symbol)
-    df = stock.history(period=period)
+    df = download_single_ticker_history(symbol, period)
 
     if df.empty:
         return df
@@ -361,7 +401,7 @@ def get_news(symbol):
 
 @st.cache_data(ttl=3600)
 def get_almanac_signals():
-    spy = yf.download("SPY", period="2y", progress=False)
+    spy = download_single_ticker_history("SPY", "2y")
 
     if spy.empty:
         return {
@@ -863,11 +903,18 @@ def render_almanac_tab(almanac):
 
 
 def load_heatmap_data():
+    batch_data = download_multi_ticker_history(tuple(BIG_TECHS), "5d")
+    if batch_data.empty:
+        return pd.DataFrame()
+
     rows = []
     for ticker in BIG_TECHS:
         try:
-            data = yf.download(ticker, period="5d", progress=False)
-            close = coerce_series(data["Close"])
+            if isinstance(batch_data.columns, pd.MultiIndex):
+                ticker_frame = batch_data[ticker]
+                close = coerce_series(ticker_frame["Close"])
+            else:
+                close = coerce_series(batch_data["Close"])
             change = (close.iloc[-1] - close.iloc[0]) / close.iloc[0] * 100
             rows.append({"Ticker": ticker, "Change": float(change)})
         except Exception:
