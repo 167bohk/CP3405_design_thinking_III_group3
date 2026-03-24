@@ -364,6 +364,17 @@ def load_price_data(symbol, period):
     if df.empty:
         return df
 
+    if isinstance(df.columns, pd.MultiIndex):
+        if symbol in df.columns.get_level_values(0):
+            df = df[symbol]
+        elif symbol in df.columns.get_level_values(-1):
+            df = df.xs(symbol, axis=1, level=-1)
+        else:
+            df.columns = df.columns.get_level_values(0)
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
     df["MA20"] = df["Close"].rolling(20).mean()
 
     delta = df["Close"].diff()
