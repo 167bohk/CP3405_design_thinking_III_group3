@@ -23,6 +23,11 @@ except ImportError:
     AutoModelForSequenceClassification = None
     AutoTokenizer = None
 
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
 
 # ---------- App Setup: page metadata, API clients, shared constants ----------
 
@@ -43,6 +48,7 @@ BIG_TECHS = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "GOOGL", "AMD"]
 PERIOD_OPTIONS = ["3mo", "6mo", "1y", "2y", "5y"]
 FORECAST_STATE_KEY = "forecast_result"
 US_MARKET_TZ = ZoneInfo("America/New_York")
+FINBERT_MIN_AVAILABLE_MB = 900
 
 
 # ---------- Theme: light/dark colors and global CSS ----------
@@ -345,6 +351,14 @@ def render_app_header(logo_path, title, theme):
     )
 
 
+def has_enough_memory_for_finbert(min_available_mb=FINBERT_MIN_AVAILABLE_MB):
+    if psutil is None:
+        return True
+
+    available_mb = psutil.virtual_memory().available / 1024 / 1024
+    return available_mb >= min_available_mb
+
+
 # ---------- Data Layer: market history, news, and seasonality inputs ----------
 
 @st.cache_data(ttl=900)
@@ -464,11 +478,17 @@ def load_finbert():
     if torch is None or AutoTokenizer is None or AutoModelForSequenceClassification is None:
         return None, None
 
-    model_name = "ProsusAI/finbert"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSequenceClassification.from_pretrained(model_name)
-    model.eval()
-    return tokenizer, model
+    if not has_enough_memory_for_finbert():
+        return None, None
+
+    try:
+        model_name = "ProsusAI/finbert"
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        model.eval()
+        return tokenizer, model
+    except Exception:
+        return None, None
 
 
 def score_text_with_finbert(text, tokenizer, model):
@@ -542,6 +562,8 @@ def aggregate_news_sentiment(scored_news):
 
 def build_news_sentiment_summary(scored_news):
     if not scored_news:
+        if psutil is not None and not has_enough_memory_for_finbert():
+            return "FinBERT disabled due to memory limits; using technical signals only."
         return "FinBERT unavailable; using headlines without structured sentiment score."
 
     average_compound = sum(item["compound"] for item in scored_news) / len(scored_news)
@@ -860,6 +882,8 @@ def render_prediction_card(pred_price, current_price, theme):
 def render_signal_card(forecast_result):
     signal_class = "signal-buy" if forecast_result["signal_text"] == "BUY" else "signal-sell"
     arrow = "\u2191" if forecast_result["signal_text"] == "BUY" else "\u2193"
+    reference_close_date = forecast_result.get("reference_close_date", "last completed")
+    predicted_label = forecast_result.get("predicted_label", "")
 
     st.markdown(
         f"""
@@ -867,9 +891,9 @@ def render_signal_card(forecast_result):
             <div class="signal-card-title {signal_class}">{arrow} {forecast_result["signal_text"]}</div>
             <div class="signal-card-meta">
                 Forecast for {forecast_result["predicted_date"]} |
-                {forecast_result["predicted_change_pct"]:+.2f}% vs {forecast_result["reference_close_date"]} close
+                {forecast_result["predicted_change_pct"]:+.2f}% vs {reference_close_date} close
             </div>
-            <div class="signal-card-meta">{forecast_result["predicted_label"]}</div>
+            <div class="signal-card-meta">{predicted_label}</div>
         </div>
         """,
         unsafe_allow_html=True,
