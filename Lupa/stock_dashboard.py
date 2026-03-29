@@ -256,6 +256,13 @@ def get_next_trading_day(base_date):
     return next_day
 
 
+def get_previous_trading_day(base_date):
+    previous_day = pd.Timestamp(base_date).date() - timedelta(days=1)
+    while previous_day.weekday() >= 5:
+        previous_day -= timedelta(days=1)
+    return previous_day
+
+
 def get_next_market_open(reference_time):
     candidate_date = reference_time.date()
 
@@ -286,6 +293,13 @@ def has_stable_completed_close(market_now):
     market_close = market_now.replace(hour=16, minute=0, second=0, microsecond=0)
     stable_after = market_close + timedelta(hours=MARKET_CLOSE_STABILIZATION_HOURS)
     return market_now >= stable_after
+
+
+def normalize_target_trading_date(target_date):
+    normalized = pd.Timestamp(target_date).date()
+    while normalized.weekday() >= 5:
+        normalized = get_next_trading_day(normalized)
+    return normalized
 
 
 def get_prediction_target_context(latest_trading_timestamp):
@@ -952,6 +966,10 @@ def render_signal_card(forecast_result):
 def render_news_tab(symbol, news_items, scored_news, theme):
     st.subheader(f"{symbol} News")
 
+    if not news_items:
+        st.info("News is disabled in historical replay mode to avoid future information leakage.")
+        return
+
     scored_lookup = {item["headline"]: item for item in scored_news}
 
     for news_item in news_items[:10]:
@@ -1023,28 +1041,65 @@ period = st.sidebar.selectbox("Analysis Window", PERIOD_OPTIONS, index=2)
 
 symbol = st.session_state.ticker.upper()
 raw_df = load_price_data(symbol, period)
-df = keep_completed_market_data(raw_df)
+latest_completed_df = keep_completed_market_data(raw_df)
 
-if df.empty:
+if latest_completed_df.empty:
     st.error("Ticker not found or latest completed close is not available yet")
     st.stop()
 
-news = get_news(symbol)
+auto_target_context = get_prediction_target_context(latest_completed_df.index[-1])
+selected_target_date = st.sidebar.date_input(
+    "Prediction Target Date",
+    value=auto_target_context["target_date"],
+)
+selected_target_date = normalize_target_trading_date(selected_target_date)
+
+historical_mode = selected_target_date != auto_target_context["target_date"]
+
+if historical_mode:
+    reference_close_date = get_previous_trading_day(selected_target_date)
+    df = raw_df[raw_df.index.date <= reference_close_date]
+    if df.empty:
+        st.error("Not enough historical data is available for the selected target date")
+        st.stop()
+    target_context = {
+        "latest_date": reference_close_date,
+        "target_date": selected_target_date,
+        "target_label": f"Historical replay mode; using {reference_close_date} close as reference",
+        "market_now": datetime.now(US_MARKET_TZ),
+    }
+else:
+    df = latest_completed_df
+    target_context = auto_target_context
+
+active_target_key = str(target_context["target_date"])
+if st.session_state.get("active_target_date") != active_target_key:
+    clear_forecast_state()
+    st.session_state["active_target_date"] = active_target_key
+
+if historical_mode:
+    news = []
+    scored_news = []
+else:
+    news = get_news(symbol)
+    headline_list = [item.get("headline", "") for item in news[:10] if item.get("headline")]
+    scored_news = score_news_with_finbert(headline_list)
+
 almanac = get_almanac_signals()
-headline_list = [item.get("headline", "") for item in news[:10] if item.get("headline")]
-scored_news = score_news_with_finbert(headline_list)
 
 price = df["Close"].iloc[-1]
 ret = df["Returns"].iloc[-1]
 trend = "Bullish" if price > df["MA20"].iloc[-1] else "Bearish"
 technical_sentiment = calculate_technical_sentiment(df)
 news_sentiment = aggregate_news_sentiment(scored_news)
-sentiment = 0.7 * technical_sentiment + 0.3 * news_sentiment
+sentiment = technical_sentiment if historical_mode else (0.7 * technical_sentiment + 0.3 * news_sentiment)
 pred_price = price_forecast(df)
-target_context = get_prediction_target_context(df.index[-1])
-
-news_sentiment_summary = build_news_sentiment_summary(scored_news)
-news_summary = build_prompt_news_summary(news, scored_news)
+if historical_mode:
+    news_sentiment_summary = "Historical replay mode: news and FinBERT are disabled to avoid future leakage."
+    news_summary = "Historical replay mode: no news headlines included."
+else:
+    news_sentiment_summary = build_news_sentiment_summary(scored_news)
+    news_summary = build_prompt_news_summary(news, scored_news)
 
 st.markdown(f"## {symbol} Market Overview")
 
@@ -1100,6 +1155,13 @@ with tab_chart:
 with tab_ai:
     left_col, right_col = st.columns(2)
 
+    if historical_mode:
+        st.info(
+            f"Historical replay mode is active for target date {target_context['target_date']}. "
+            "XGBoost uses only data available before that date. "
+            "LLM/news are disabled here to avoid future leakage."
+        )
+
     with left_col:
         st.subheader("XGBoost Prediction")
         render_prediction_card(pred_price, price, theme)
@@ -1124,6 +1186,7 @@ with tab_ai:
                 "Run LLM Analysis",
                 key="llm_button",
                 use_container_width=True,
+                disabled=historical_mode,
             )
 
     if run_llm_clicked:
