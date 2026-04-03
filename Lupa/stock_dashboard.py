@@ -383,10 +383,10 @@ def append_prediction_log_record(ticker, reference_close_price, forecast_result)
         "ensemble_price": float(forecast_result["ensemble_price"]),
         "weight_xgb_used": float(1 - forecast_result["llm_conf"]),
         "weight_llm_used": float(forecast_result["llm_conf"]),
-        "actual_close": "",
-        "xgb_abs_error": "",
-        "llm_abs_error": "",
-        "ensemble_abs_error": "",
+        "actual_close": None,
+        "xgb_abs_error": None,
+        "llm_abs_error": None,
+        "ensemble_abs_error": None,
         "status": "pending",
     }
 
