@@ -369,7 +369,7 @@ def append_prediction_log_record(ticker, reference_close_price, forecast_result)
     reference_close_date = forecast_result["reference_close_date"]
 
     if prediction_record_exists(ticker, target_date, reference_close_date):
-        return "duplicate"
+        return "duplicate", None
 
     row_dict = {
         "ticker": ticker,
@@ -393,21 +393,27 @@ def append_prediction_log_record(ticker, reference_close_price, forecast_result)
     if get_supabase_config() is not None:
         try:
             supabase_request("POST", "/rest/v1/prediction_log", [row_dict])
-            return "supabase"
-        except (HTTPError, URLError, TimeoutError, ValueError):
-            pass
+            return "supabase", None
+        except HTTPError as exc:
+            try:
+                error_body = exc.read().decode("utf-8")
+            except Exception:
+                error_body = exc.reason
+            return "csv", f"Supabase insert failed ({exc.code}): {error_body}"
+        except (URLError, TimeoutError, ValueError) as exc:
+            return "csv", f"Supabase insert failed: {exc}"
 
     worksheet = get_google_prediction_log_worksheet()
     if worksheet is not None:
         worksheet.append_row([row_dict[col] for col in PREDICTION_LOG_COLUMNS], value_input_option="USER_ENTERED")
-        return "google_sheets"
+        return "google_sheets", None
 
     row = pd.DataFrame([row_dict], columns=PREDICTION_LOG_COLUMNS)
     if os.path.exists(PREDICTION_LOG_PATH):
         row.to_csv(PREDICTION_LOG_PATH, mode="a", header=False, index=False)
     else:
         row.to_csv(PREDICTION_LOG_PATH, index=False)
-    return "csv"
+    return "csv", None
 
 
 # ---------- Shared Helpers: small reusable calculations and formatters ----------
@@ -1311,7 +1317,7 @@ with tab_ai:
             llm_reason=llm_reason,
             target_context=target_context,
         )
-        record_status = append_prediction_log_record(
+        record_status, record_error = append_prediction_log_record(
             ticker=symbol,
             reference_close_price=price,
             forecast_result=st.session_state[FORECAST_STATE_KEY],
@@ -1322,6 +1328,8 @@ with tab_ai:
             st.caption("Prediction logged to Google Sheets for dynamic weighting.")
         elif record_status == "csv":
             st.caption("Prediction logged locally for dynamic weighting.")
+            if record_error:
+                st.caption(record_error)
         else:
             st.caption("Prediction for this ticker and target date is already logged.")
 
