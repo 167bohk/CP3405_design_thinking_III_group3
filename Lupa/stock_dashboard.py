@@ -2,6 +2,7 @@ import json
 import os
 import base64
 from datetime import datetime, timedelta
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
@@ -368,7 +369,7 @@ def append_prediction_log_record(ticker, reference_close_price, forecast_result)
     reference_close_date = forecast_result["reference_close_date"]
 
     if prediction_record_exists(ticker, target_date, reference_close_date):
-        return False
+        return "duplicate"
 
     row_dict = {
         "ticker": ticker,
@@ -390,20 +391,23 @@ def append_prediction_log_record(ticker, reference_close_price, forecast_result)
     }
 
     if get_supabase_config() is not None:
-        supabase_request("POST", "/rest/v1/prediction_log", [row_dict])
-        return True
+        try:
+            supabase_request("POST", "/rest/v1/prediction_log", [row_dict])
+            return "supabase"
+        except (HTTPError, URLError, TimeoutError, ValueError):
+            pass
 
     worksheet = get_google_prediction_log_worksheet()
     if worksheet is not None:
         worksheet.append_row([row_dict[col] for col in PREDICTION_LOG_COLUMNS], value_input_option="USER_ENTERED")
-        return True
+        return "google_sheets"
 
     row = pd.DataFrame([row_dict], columns=PREDICTION_LOG_COLUMNS)
     if os.path.exists(PREDICTION_LOG_PATH):
         row.to_csv(PREDICTION_LOG_PATH, mode="a", header=False, index=False)
     else:
         row.to_csv(PREDICTION_LOG_PATH, index=False)
-    return True
+    return "csv"
 
 
 # ---------- Shared Helpers: small reusable calculations and formatters ----------
@@ -1307,13 +1311,17 @@ with tab_ai:
             llm_reason=llm_reason,
             target_context=target_context,
         )
-        record_saved = append_prediction_log_record(
+        record_status = append_prediction_log_record(
             ticker=symbol,
             reference_close_price=price,
             forecast_result=st.session_state[FORECAST_STATE_KEY],
         )
-        if record_saved:
-            st.caption("Prediction logged for dynamic weighting.")
+        if record_status == "supabase":
+            st.caption("Prediction logged to Supabase for dynamic weighting.")
+        elif record_status == "google_sheets":
+            st.caption("Prediction logged to Google Sheets for dynamic weighting.")
+        elif record_status == "csv":
+            st.caption("Prediction logged locally for dynamic weighting.")
         else:
             st.caption("Prediction for this ticker and target date is already logged.")
 
