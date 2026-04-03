@@ -2,6 +2,8 @@ import json
 import os
 import base64
 from datetime import datetime, timedelta
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 import finnhub
@@ -14,6 +16,11 @@ import yfinance as yf
 from openai import OpenAI
 from plotly.subplots import make_subplots
 from xgboost import XGBRegressor
+
+try:
+    import gspread
+except ImportError:
+    gspread = None
 
 try:
     import torch
@@ -51,6 +58,24 @@ US_MARKET_TZ = ZoneInfo("America/New_York")
 FINBERT_MIN_AVAILABLE_MB = 900
 MARKET_CLOSE_STABILIZATION_HOURS = 2
 PREDICTION_LOG_PATH = os.path.join(os.path.dirname(__file__), "llm_prediction_log.csv")
+PREDICTION_LOG_COLUMNS = [
+    "ticker",
+    "created_at",
+    "target_date",
+    "reference_close_date",
+    "reference_close_price",
+    "xgb_pred_price",
+    "llm_pred_price",
+    "llm_conf",
+    "ensemble_price",
+    "weight_xgb_used",
+    "weight_llm_used",
+    "actual_close",
+    "xgb_abs_error",
+    "llm_abs_error",
+    "ensemble_abs_error",
+    "status",
+]
 
 
 # ---------- Theme: light/dark colors and global CSS ----------
@@ -242,32 +267,90 @@ def on_bigtech_changed():
     clear_forecast_state()
 
 
+def get_supabase_config():
+    url = st.secrets.get("SUPABASE_URL")
+    key = st.secrets.get("SUPABASE_KEY")
+    if not url or not key:
+        return None
+    return {"url": url.rstrip("/"), "key": key}
+
+
+def supabase_request(method, path, payload=None):
+    config = get_supabase_config()
+    if config is None:
+        return None
+
+    request = Request(
+        f'{config["url"]}{path}',
+        method=method,
+        headers={
+            "apikey": config["key"],
+            "Authorization": f'Bearer {config["key"]}',
+            "Content-Type": "application/json",
+        },
+        data=None if payload is None else json.dumps(payload).encode("utf-8"),
+    )
+    with urlopen(request, timeout=15) as response:
+        body = response.read().decode("utf-8")
+    return json.loads(body) if body else None
+
+
+@st.cache_resource
+def get_google_prediction_log_worksheet():
+    service_account_info = st.secrets.get("GOOGLE_SERVICE_ACCOUNT")
+    spreadsheet_id = st.secrets.get("GOOGLE_PREDICTION_LOG_SHEET_ID")
+    worksheet_name = st.secrets.get("GOOGLE_PREDICTION_LOG_WORKSHEET", "prediction_log")
+
+    if gspread is None or not service_account_info or not spreadsheet_id:
+        return None
+
+    if isinstance(service_account_info, str):
+        service_account_info = json.loads(service_account_info)
+
+    client = gspread.service_account_from_dict(service_account_info)
+    spreadsheet = client.open_by_key(spreadsheet_id)
+    try:
+        worksheet = spreadsheet.worksheet(worksheet_name)
+    except gspread.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(title=worksheet_name, rows=2000, cols=30)
+        worksheet.append_row(PREDICTION_LOG_COLUMNS)
+    return worksheet
+
+
 def load_prediction_log():
-    if not os.path.exists(PREDICTION_LOG_PATH):
-        return pd.DataFrame(
-            columns=[
-                "ticker",
-                "created_at",
-                "target_date",
-                "reference_close_date",
-                "reference_close_price",
-                "xgb_pred_price",
-                "llm_pred_price",
-                "llm_conf",
-                "ensemble_price",
-                "weight_xgb_used",
-                "weight_llm_used",
-                "actual_close",
-                "xgb_abs_error",
-                "llm_abs_error",
-                "ensemble_abs_error",
-                "status",
-            ]
+    if get_supabase_config() is not None:
+        records = supabase_request(
+            "GET",
+            "/rest/v1/prediction_log?select=*&order=created_at.desc",
         )
+        if not records:
+            return pd.DataFrame(columns=PREDICTION_LOG_COLUMNS)
+        return pd.DataFrame(records)
+
+    worksheet = get_google_prediction_log_worksheet()
+    if worksheet is not None:
+        records = worksheet.get_all_records()
+        if not records:
+            return pd.DataFrame(columns=PREDICTION_LOG_COLUMNS)
+        return pd.DataFrame(records)
+
+    if not os.path.exists(PREDICTION_LOG_PATH):
+        return pd.DataFrame(columns=PREDICTION_LOG_COLUMNS)
     return pd.read_csv(PREDICTION_LOG_PATH)
 
 
 def prediction_record_exists(ticker, target_date, reference_close_date):
+    if get_supabase_config() is not None:
+        existing = supabase_request(
+            "GET",
+            "/rest/v1/prediction_log?select=id"
+            f"&ticker=eq.{quote(ticker)}"
+            f"&target_date=eq.{quote(target_date)}"
+            f"&reference_close_date=eq.{quote(reference_close_date)}"
+            "&limit=1",
+        )
+        return bool(existing)
+
     log_df = load_prediction_log()
     if log_df.empty:
         return False
@@ -287,29 +370,35 @@ def append_prediction_log_record(ticker, reference_close_price, forecast_result)
     if prediction_record_exists(ticker, target_date, reference_close_date):
         return False
 
-    row = pd.DataFrame(
-        [
-            {
-                "ticker": ticker,
-                "created_at": datetime.now(ZoneInfo("Asia/Singapore")).strftime("%Y-%m-%d %H:%M:%S"),
-                "target_date": target_date,
-                "reference_close_date": reference_close_date,
-                "reference_close_price": float(reference_close_price),
-                "xgb_pred_price": float(forecast_result["pred_price"]),
-                "llm_pred_price": float(forecast_result["llm_price"]),
-                "llm_conf": float(forecast_result["llm_conf"]),
-                "ensemble_price": float(forecast_result["ensemble_price"]),
-                "weight_xgb_used": float(1 - forecast_result["llm_conf"]),
-                "weight_llm_used": float(forecast_result["llm_conf"]),
-                "actual_close": np.nan,
-                "xgb_abs_error": np.nan,
-                "llm_abs_error": np.nan,
-                "ensemble_abs_error": np.nan,
-                "status": "pending",
-            }
-        ]
-    )
+    row_dict = {
+        "ticker": ticker,
+        "created_at": datetime.now(ZoneInfo("Asia/Singapore")).strftime("%Y-%m-%d %H:%M:%S"),
+        "target_date": target_date,
+        "reference_close_date": reference_close_date,
+        "reference_close_price": float(reference_close_price),
+        "xgb_pred_price": float(forecast_result["pred_price"]),
+        "llm_pred_price": float(forecast_result["llm_price"]),
+        "llm_conf": float(forecast_result["llm_conf"]),
+        "ensemble_price": float(forecast_result["ensemble_price"]),
+        "weight_xgb_used": float(1 - forecast_result["llm_conf"]),
+        "weight_llm_used": float(forecast_result["llm_conf"]),
+        "actual_close": "",
+        "xgb_abs_error": "",
+        "llm_abs_error": "",
+        "ensemble_abs_error": "",
+        "status": "pending",
+    }
 
+    if get_supabase_config() is not None:
+        supabase_request("POST", "/rest/v1/prediction_log", [row_dict])
+        return True
+
+    worksheet = get_google_prediction_log_worksheet()
+    if worksheet is not None:
+        worksheet.append_row([row_dict[col] for col in PREDICTION_LOG_COLUMNS], value_input_option="USER_ENTERED")
+        return True
+
+    row = pd.DataFrame([row_dict], columns=PREDICTION_LOG_COLUMNS)
     if os.path.exists(PREDICTION_LOG_PATH):
         row.to_csv(PREDICTION_LOG_PATH, mode="a", header=False, index=False)
     else:
