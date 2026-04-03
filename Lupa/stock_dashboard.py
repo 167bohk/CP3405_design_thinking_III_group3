@@ -76,6 +76,10 @@ PREDICTION_LOG_COLUMNS = [
 
 # ---------- Theme: light/dark colors and global CSS ----------
 
+
+def empty_prediction_log_df():
+    return pd.DataFrame(columns=PREDICTION_LOG_COLUMNS)
+
 def get_theme(is_dark_mode):
     if is_dark_mode:
         return {
@@ -317,22 +321,24 @@ def supabase_request(method, path, payload=None):
 
 
 def load_prediction_log():
-    if get_supabase_config() is not None:
+    supabase_config = get_supabase_config()
+    if supabase_config is not None:
         records = supabase_request(
             "GET",
             "/rest/v1/prediction_log?select=*&order=created_at.desc",
         )
         if not records:
-            return pd.DataFrame(columns=PREDICTION_LOG_COLUMNS)
+            return empty_prediction_log_df()
         return pd.DataFrame(records)
 
     if not os.path.exists(PREDICTION_LOG_PATH):
-        return pd.DataFrame(columns=PREDICTION_LOG_COLUMNS)
+        return empty_prediction_log_df()
     return pd.read_csv(PREDICTION_LOG_PATH)
 
 
 def prediction_record_exists(ticker, target_date, reference_close_date):
-    if get_supabase_config() is not None:
+    supabase_config = get_supabase_config()
+    if supabase_config is not None:
         existing = supabase_request(
             "GET",
             "/rest/v1/prediction_log?select=id"
@@ -381,7 +387,8 @@ def append_prediction_log_record(ticker, reference_close_price, forecast_result)
         "status": "pending",
     }
 
-    if get_supabase_config() is not None:
+    supabase_config = get_supabase_config()
+    if supabase_config is not None:
         try:
             supabase_request("POST", "/rest/v1/prediction_log", [row_dict])
             return "supabase", None
@@ -430,6 +437,7 @@ def update_actual_closes_in_log():
     if log_df.empty:
         return {"updated": 0, "skipped": 0}
 
+    supabase_config = get_supabase_config()
     pending_df = log_df[log_df["status"].fillna("pending") != "completed"].copy()
     updated = 0
     skipped = 0
@@ -455,7 +463,7 @@ def update_actual_closes_in_log():
             "status": "completed",
         }
 
-        if get_supabase_config() is not None and pd.notna(record_id):
+        if supabase_config is not None and pd.notna(record_id):
             supabase_request(
                 "PATCH",
                 f"/rest/v1/prediction_log?id=eq.{int(record_id)}",
@@ -471,7 +479,7 @@ def update_actual_closes_in_log():
                 log_df.loc[mask, key] = value
         updated += 1
 
-    if get_supabase_config() is None and updated > 0:
+    if supabase_config is None and updated > 0:
         log_df.to_csv(PREDICTION_LOG_PATH, index=False)
 
     return {"updated": updated, "skipped": skipped}
@@ -480,39 +488,26 @@ def update_actual_closes_in_log():
 def get_dynamic_blend_weights(ticker, fallback_llm_weight, min_samples=5, window=10):
     fallback_llm_weight = min(max(float(fallback_llm_weight), 0.2), 0.8)
     fallback_xgb_weight = 1 - fallback_llm_weight
+    default_result = {
+        "weight_xgb": fallback_xgb_weight,
+        "weight_llm": fallback_llm_weight,
+        "source": "default",
+        "sample_count": 0,
+        "mae_xgb": None,
+        "mae_llm": None,
+    }
 
     log_df = load_prediction_log()
     if log_df.empty:
-        return {
-            "weight_xgb": fallback_xgb_weight,
-            "weight_llm": fallback_llm_weight,
-            "source": "default",
-            "sample_count": 0,
-            "mae_xgb": None,
-            "mae_llm": None,
-        }
+        return default_result
 
     ticker_df = log_df[log_df["ticker"] == ticker].copy()
     if ticker_df.empty:
-        return {
-            "weight_xgb": fallback_xgb_weight,
-            "weight_llm": fallback_llm_weight,
-            "source": "default",
-            "sample_count": 0,
-            "mae_xgb": None,
-            "mae_llm": None,
-        }
+        return default_result
 
     ticker_df = ticker_df[ticker_df["status"].fillna("pending") == "completed"].copy()
     if ticker_df.empty:
-        return {
-            "weight_xgb": fallback_xgb_weight,
-            "weight_llm": fallback_llm_weight,
-            "source": "default",
-            "sample_count": 0,
-            "mae_xgb": None,
-            "mae_llm": None,
-        }
+        return default_result
 
     ticker_df["created_at"] = pd.to_datetime(ticker_df["created_at"], errors="coerce")
     ticker_df["xgb_abs_error"] = pd.to_numeric(ticker_df["xgb_abs_error"], errors="coerce")
@@ -1379,7 +1374,7 @@ with metric_col3:
 with metric_col4:
     st.metric("RSI", f"{df['RSI'].iloc[-1]:.1f}")
 
-sentiment_left, sentiment_center, sentiment_right = st.columns([1, 2, 1])
+_, sentiment_center, _ = st.columns([1, 2, 1])
 with sentiment_center:
     st.plotly_chart(build_sentiment_gauge(sentiment, theme), use_container_width=False)
     with st.expander("How Market Sentiment Is Calculated"):
