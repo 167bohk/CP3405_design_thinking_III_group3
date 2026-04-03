@@ -50,6 +50,7 @@ FORECAST_STATE_KEY = "forecast_result"
 US_MARKET_TZ = ZoneInfo("America/New_York")
 FINBERT_MIN_AVAILABLE_MB = 900
 MARKET_CLOSE_STABILIZATION_HOURS = 2
+PREDICTION_LOG_PATH = os.path.join(os.path.dirname(__file__), "llm_prediction_log.csv")
 
 
 # ---------- Theme: light/dark colors and global CSS ----------
@@ -239,6 +240,81 @@ def on_bigtech_changed():
     if st.session_state.bigtech:
         st.session_state.ticker = st.session_state.bigtech
     clear_forecast_state()
+
+
+def load_prediction_log():
+    if not os.path.exists(PREDICTION_LOG_PATH):
+        return pd.DataFrame(
+            columns=[
+                "ticker",
+                "created_at",
+                "target_date",
+                "reference_close_date",
+                "reference_close_price",
+                "xgb_pred_price",
+                "llm_pred_price",
+                "llm_conf",
+                "ensemble_price",
+                "weight_xgb_used",
+                "weight_llm_used",
+                "actual_close",
+                "xgb_abs_error",
+                "llm_abs_error",
+                "ensemble_abs_error",
+                "status",
+            ]
+        )
+    return pd.read_csv(PREDICTION_LOG_PATH)
+
+
+def prediction_record_exists(ticker, target_date, reference_close_date):
+    log_df = load_prediction_log()
+    if log_df.empty:
+        return False
+
+    existing = log_df[
+        (log_df["ticker"] == ticker)
+        & (log_df["target_date"] == target_date)
+        & (log_df["reference_close_date"] == reference_close_date)
+    ]
+    return not existing.empty
+
+
+def append_prediction_log_record(ticker, reference_close_price, forecast_result):
+    target_date = forecast_result["predicted_date"]
+    reference_close_date = forecast_result["reference_close_date"]
+
+    if prediction_record_exists(ticker, target_date, reference_close_date):
+        return False
+
+    row = pd.DataFrame(
+        [
+            {
+                "ticker": ticker,
+                "created_at": datetime.now(ZoneInfo("Asia/Singapore")).strftime("%Y-%m-%d %H:%M:%S"),
+                "target_date": target_date,
+                "reference_close_date": reference_close_date,
+                "reference_close_price": float(reference_close_price),
+                "xgb_pred_price": float(forecast_result["pred_price"]),
+                "llm_pred_price": float(forecast_result["llm_price"]),
+                "llm_conf": float(forecast_result["llm_conf"]),
+                "ensemble_price": float(forecast_result["ensemble_price"]),
+                "weight_xgb_used": float(1 - forecast_result["llm_conf"]),
+                "weight_llm_used": float(forecast_result["llm_conf"]),
+                "actual_close": np.nan,
+                "xgb_abs_error": np.nan,
+                "llm_abs_error": np.nan,
+                "ensemble_abs_error": np.nan,
+                "status": "pending",
+            }
+        ]
+    )
+
+    if os.path.exists(PREDICTION_LOG_PATH):
+        row.to_csv(PREDICTION_LOG_PATH, mode="a", header=False, index=False)
+    else:
+        row.to_csv(PREDICTION_LOG_PATH, index=False)
+    return True
 
 
 # ---------- Shared Helpers: small reusable calculations and formatters ----------
@@ -1142,6 +1218,15 @@ with tab_ai:
             llm_reason=llm_reason,
             target_context=target_context,
         )
+        record_saved = append_prediction_log_record(
+            ticker=symbol,
+            reference_close_price=price,
+            forecast_result=st.session_state[FORECAST_STATE_KEY],
+        )
+        if record_saved:
+            st.caption("Prediction logged for dynamic weighting.")
+        else:
+            st.caption("Prediction for this ticker and target date is already logged.")
 
     forecast_result = st.session_state.get(FORECAST_STATE_KEY)
     if forecast_result:
