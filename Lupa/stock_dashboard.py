@@ -91,6 +91,9 @@ def get_theme(is_dark_mode):
             "card_border": "1px solid rgba(255,255,255,0.10)",
             "input_bg": "#0f172a",
             "input_border": "1px solid rgba(255,255,255,0.12)",
+            "dropdown_bg": "#0f172a",
+            "dropdown_hover_bg": "#1e293b",
+            "dropdown_selected_bg": "#273449",
             "plotly_template": "plotly_dark",
             "grid_color": "rgba(255,255,255,0.10)",
         }
@@ -108,6 +111,9 @@ def get_theme(is_dark_mode):
         "card_border": "1px solid rgba(15,23,42,0.08)",
         "input_bg": "#ffffff",
         "input_border": "1px solid rgba(15,23,42,0.16)",
+        "dropdown_bg": "#ffffff",
+        "dropdown_hover_bg": "#f1f5f9",
+        "dropdown_selected_bg": "#e2e8f0",
         "plotly_template": "plotly_white",
         "grid_color": "rgba(0,0,0,0.10)",
     }
@@ -167,6 +173,25 @@ def apply_theme(theme):
             background: {theme["input_bg"]} !important;
             color: {theme["text_color"]} !important;
             -webkit-text-fill-color: {theme["text_color"]} !important;
+        }}
+
+        div[data-baseweb="popover"] ul {{
+            background: {theme["dropdown_bg"]} !important;
+            border: {theme["input_border"]} !important;
+        }}
+
+        div[data-baseweb="popover"] li {{
+            background: {theme["dropdown_bg"]} !important;
+            color: {theme["text_color"]} !important;
+        }}
+
+        div[data-baseweb="popover"] li:hover {{
+            background: {theme["dropdown_hover_bg"]} !important;
+        }}
+
+        div[data-baseweb="popover"] li[aria-selected="true"] {{
+            background: {theme["dropdown_selected_bg"]} !important;
+            color: {theme["text_color"]} !important;
         }}
 
         .stButton > button p {{
@@ -1501,8 +1526,8 @@ with tab_ai:
                     extra_text += f' | waiting for {max(0, 5 - forecast_result.get("weight_sample_count", 0))} more completed runs'
                 if forecast_result.get("mae_xgb") is not None and forecast_result.get("mae_llm") is not None:
                     extra_text += (
-                        f' | XGB MAE: {forecast_result["mae_xgb"]:.2f}'
-                        f' | LLM MAE: {forecast_result["mae_llm"]:.2f}'
+                        f' | XGB MAE: ${forecast_result["mae_xgb"]:.2f}'
+                        f' | LLM MAE: ${forecast_result["mae_llm"]:.2f}'
                     )
             if title == "LLM Price":
                 extra_text = f'Confidence: {forecast_result["llm_conf"]:.0%}'
