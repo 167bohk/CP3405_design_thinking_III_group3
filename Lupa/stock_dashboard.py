@@ -1341,13 +1341,6 @@ render_app_header(logo_path, "Lupa AI Stock Terminal", theme)
 st.sidebar.text_input("Ticker", key="ticker", on_change=on_ticker_changed)
 st.sidebar.radio("Big Tech", BIG_TECHS, key="bigtech", index=None, on_change=on_bigtech_changed)
 period = st.sidebar.selectbox("Analysis Window", PERIOD_OPTIONS, index=2)
-update_actuals_clicked = st.sidebar.button("Update Actual Closes", use_container_width=True)
-
-if update_actuals_clicked:
-    update_result = update_actual_closes_in_log()
-    st.sidebar.caption(
-        f'Updated {update_result["updated"]} record(s); skipped {update_result["skipped"]}.'
-    )
 
 symbol = st.session_state.ticker.upper()
 raw_df = load_price_data(symbol, period)
@@ -1455,6 +1448,7 @@ with tab_ai:
             )
 
     if run_llm_clicked:
+        update_result = update_actual_closes_in_log()
         llm_text = run_llm(llm_prompt)
         llm_price, llm_conf, llm_reason, llm_parse_error = parse_llm_response(llm_text, price)
 
@@ -1476,6 +1470,10 @@ with tab_ai:
             reference_close_price=price,
             forecast_result=st.session_state[FORECAST_STATE_KEY],
         )
+        if update_result["updated"] > 0 or update_result["skipped"] > 0:
+            st.caption(
+                f'Historical records refreshed: updated {update_result["updated"]}, skipped {update_result["skipped"]}.'
+            )
         if record_status == "supabase":
             st.caption("Prediction logged to Supabase for dynamic weighting.")
         elif record_status == "csv":
