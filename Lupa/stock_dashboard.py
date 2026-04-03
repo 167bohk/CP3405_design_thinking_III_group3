@@ -19,11 +19,6 @@ from plotly.subplots import make_subplots
 from xgboost import XGBRegressor
 
 try:
-    import gspread
-except ImportError:
-    gspread = None
-
-try:
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 except ImportError:
@@ -296,41 +291,12 @@ def supabase_request(method, path, payload=None):
     return json.loads(body) if body else None
 
 
-@st.cache_resource
-def get_google_prediction_log_worksheet():
-    service_account_info = st.secrets.get("GOOGLE_SERVICE_ACCOUNT")
-    spreadsheet_id = st.secrets.get("GOOGLE_PREDICTION_LOG_SHEET_ID")
-    worksheet_name = st.secrets.get("GOOGLE_PREDICTION_LOG_WORKSHEET", "prediction_log")
-
-    if gspread is None or not service_account_info or not spreadsheet_id:
-        return None
-
-    if isinstance(service_account_info, str):
-        service_account_info = json.loads(service_account_info)
-
-    client = gspread.service_account_from_dict(service_account_info)
-    spreadsheet = client.open_by_key(spreadsheet_id)
-    try:
-        worksheet = spreadsheet.worksheet(worksheet_name)
-    except gspread.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(title=worksheet_name, rows=2000, cols=30)
-        worksheet.append_row(PREDICTION_LOG_COLUMNS)
-    return worksheet
-
-
 def load_prediction_log():
     if get_supabase_config() is not None:
         records = supabase_request(
             "GET",
             "/rest/v1/prediction_log?select=*&order=created_at.desc",
         )
-        if not records:
-            return pd.DataFrame(columns=PREDICTION_LOG_COLUMNS)
-        return pd.DataFrame(records)
-
-    worksheet = get_google_prediction_log_worksheet()
-    if worksheet is not None:
-        records = worksheet.get_all_records()
         if not records:
             return pd.DataFrame(columns=PREDICTION_LOG_COLUMNS)
         return pd.DataFrame(records)
@@ -381,8 +347,8 @@ def append_prediction_log_record(ticker, reference_close_price, forecast_result)
         "llm_pred_price": float(forecast_result["llm_price"]),
         "llm_conf": float(forecast_result["llm_conf"]),
         "ensemble_price": float(forecast_result["ensemble_price"]),
-        "weight_xgb_used": float(1 - forecast_result["llm_conf"]),
-        "weight_llm_used": float(forecast_result["llm_conf"]),
+        "weight_xgb_used": float(forecast_result["weight_xgb"]),
+        "weight_llm_used": float(forecast_result["weight_llm"]),
         "actual_close": None,
         "xgb_abs_error": None,
         "llm_abs_error": None,
@@ -403,17 +369,163 @@ def append_prediction_log_record(ticker, reference_close_price, forecast_result)
         except (URLError, TimeoutError, ValueError) as exc:
             return "csv", f"Supabase insert failed: {exc}"
 
-    worksheet = get_google_prediction_log_worksheet()
-    if worksheet is not None:
-        worksheet.append_row([row_dict[col] for col in PREDICTION_LOG_COLUMNS], value_input_option="USER_ENTERED")
-        return "google_sheets", None
-
     row = pd.DataFrame([row_dict], columns=PREDICTION_LOG_COLUMNS)
     if os.path.exists(PREDICTION_LOG_PATH):
         row.to_csv(PREDICTION_LOG_PATH, mode="a", header=False, index=False)
     else:
         row.to_csv(PREDICTION_LOG_PATH, index=False)
     return "csv", None
+
+
+def fetch_actual_close_for_target_date(ticker, target_date_str):
+    target_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
+    start = (target_date - timedelta(days=2)).strftime("%Y-%m-%d")
+    end = (target_date + timedelta(days=3)).strftime("%Y-%m-%d")
+    df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=False)
+    if df.empty:
+        ticker_history = yf.Ticker(ticker).history(start=start, end=end, auto_adjust=False)
+        df = ticker_history
+    if df.empty:
+        return None
+
+    if isinstance(df.columns, pd.MultiIndex):
+        try:
+            df = df.xs(ticker, axis=1, level=-1)
+        except Exception:
+            df.columns = df.columns.get_level_values(0)
+
+    for ts, row in df.iterrows():
+        if pd.Timestamp(ts).date() == target_date:
+            return float(row["Close"])
+    return None
+
+
+def update_actual_closes_in_log():
+    log_df = load_prediction_log()
+    if log_df.empty:
+        return {"updated": 0, "skipped": 0}
+
+    pending_df = log_df[log_df["status"].fillna("pending") != "completed"].copy()
+    updated = 0
+    skipped = 0
+
+    for _, row in pending_df.iterrows():
+        record_id = row.get("id")
+        ticker = row["ticker"]
+        target_date = row["target_date"]
+        actual_close = fetch_actual_close_for_target_date(ticker, target_date)
+        if actual_close is None:
+            skipped += 1
+            continue
+
+        xgb_abs_error = abs(float(row["xgb_pred_price"]) - actual_close)
+        llm_abs_error = abs(float(row["llm_pred_price"]) - actual_close)
+        ensemble_abs_error = abs(float(row["ensemble_price"]) - actual_close)
+
+        update_payload = {
+            "actual_close": actual_close,
+            "xgb_abs_error": xgb_abs_error,
+            "llm_abs_error": llm_abs_error,
+            "ensemble_abs_error": ensemble_abs_error,
+            "status": "completed",
+        }
+
+        if get_supabase_config() is not None and pd.notna(record_id):
+            supabase_request(
+                "PATCH",
+                f"/rest/v1/prediction_log?id=eq.{int(record_id)}",
+                update_payload,
+            )
+        else:
+            mask = (
+                (log_df["ticker"] == ticker)
+                & (log_df["target_date"] == target_date)
+                & (log_df["reference_close_date"] == row["reference_close_date"])
+            )
+            for key, value in update_payload.items():
+                log_df.loc[mask, key] = value
+        updated += 1
+
+    if get_supabase_config() is None and updated > 0:
+        log_df.to_csv(PREDICTION_LOG_PATH, index=False)
+
+    return {"updated": updated, "skipped": skipped}
+
+
+def get_dynamic_blend_weights(ticker, fallback_llm_weight, min_samples=5, window=10):
+    fallback_llm_weight = min(max(float(fallback_llm_weight), 0.2), 0.8)
+    fallback_xgb_weight = 1 - fallback_llm_weight
+
+    log_df = load_prediction_log()
+    if log_df.empty:
+        return {
+            "weight_xgb": fallback_xgb_weight,
+            "weight_llm": fallback_llm_weight,
+            "source": "default",
+            "sample_count": 0,
+            "mae_xgb": None,
+            "mae_llm": None,
+        }
+
+    ticker_df = log_df[log_df["ticker"] == ticker].copy()
+    if ticker_df.empty:
+        return {
+            "weight_xgb": fallback_xgb_weight,
+            "weight_llm": fallback_llm_weight,
+            "source": "default",
+            "sample_count": 0,
+            "mae_xgb": None,
+            "mae_llm": None,
+        }
+
+    ticker_df = ticker_df[ticker_df["status"].fillna("pending") == "completed"].copy()
+    if ticker_df.empty:
+        return {
+            "weight_xgb": fallback_xgb_weight,
+            "weight_llm": fallback_llm_weight,
+            "source": "default",
+            "sample_count": 0,
+            "mae_xgb": None,
+            "mae_llm": None,
+        }
+
+    ticker_df["created_at"] = pd.to_datetime(ticker_df["created_at"], errors="coerce")
+    ticker_df["xgb_abs_error"] = pd.to_numeric(ticker_df["xgb_abs_error"], errors="coerce")
+    ticker_df["llm_abs_error"] = pd.to_numeric(ticker_df["llm_abs_error"], errors="coerce")
+    ticker_df = ticker_df.dropna(subset=["xgb_abs_error", "llm_abs_error"]).sort_values("created_at")
+    recent_df = ticker_df.tail(window)
+    sample_count = len(recent_df)
+
+    if sample_count < min_samples:
+        return {
+            "weight_xgb": fallback_xgb_weight,
+            "weight_llm": fallback_llm_weight,
+            "source": "default",
+            "sample_count": sample_count,
+            "mae_xgb": None,
+            "mae_llm": None,
+        }
+
+    mae_xgb = float(recent_df["xgb_abs_error"].mean())
+    mae_llm = float(recent_df["llm_abs_error"].mean())
+
+    raw_xgb = 1 / (mae_xgb + 1e-6)
+    raw_llm = 1 / (mae_llm + 1e-6)
+    total = raw_xgb + raw_llm
+    weight_xgb = raw_xgb / total
+    weight_llm = raw_llm / total
+
+    weight_xgb = max(0.2, min(0.8, weight_xgb))
+    weight_llm = 1 - weight_xgb
+
+    return {
+        "weight_xgb": weight_xgb,
+        "weight_llm": weight_llm,
+        "source": "dynamic",
+        "sample_count": sample_count,
+        "mae_xgb": mae_xgb,
+        "mae_llm": mae_llm,
+    }
 
 
 # ---------- Shared Helpers: small reusable calculations and formatters ----------
@@ -931,9 +1043,12 @@ def parse_llm_response(llm_text, fallback_price):
         return fallback_price, 0.5, "No analysis available", llm_text
 
 
-def build_forecast_result(current_price, pred_price, llm_price, llm_conf, llm_reason, target_context):
+def build_forecast_result(ticker, current_price, pred_price, llm_price, llm_conf, llm_reason, target_context):
     llm_conf = min(max(llm_conf, 0.2), 0.8)
-    ensemble_price = (pred_price * (1 - llm_conf)) + (llm_price * llm_conf)
+    blend_info = get_dynamic_blend_weights(ticker, llm_conf)
+    weight_xgb = blend_info["weight_xgb"]
+    weight_llm = blend_info["weight_llm"]
+    ensemble_price = (pred_price * weight_xgb) + (llm_price * weight_llm)
 
     return {
         "ensemble_price": ensemble_price,
@@ -941,6 +1056,12 @@ def build_forecast_result(current_price, pred_price, llm_price, llm_conf, llm_re
         "pred_price": pred_price,
         "llm_reason": llm_reason,
         "llm_conf": llm_conf,
+        "weight_xgb": weight_xgb,
+        "weight_llm": weight_llm,
+        "weight_source": blend_info["source"],
+        "weight_sample_count": blend_info["sample_count"],
+        "mae_xgb": blend_info["mae_xgb"],
+        "mae_llm": blend_info["mae_llm"],
         "signal_text": "BUY" if ensemble_price > current_price else "SELL",
         "predicted_change_pct": ((ensemble_price - current_price) / current_price) * 100,
         "reference_close_date": target_context["latest_date"].strftime("%Y-%m-%d"),
@@ -1195,6 +1316,13 @@ render_app_header(logo_path, "Lupa AI Stock Terminal", theme)
 st.sidebar.text_input("Ticker", key="ticker", on_change=on_ticker_changed)
 st.sidebar.radio("Big Tech", BIG_TECHS, key="bigtech", index=None, on_change=on_bigtech_changed)
 period = st.sidebar.selectbox("Analysis Window", PERIOD_OPTIONS, index=2)
+update_actuals_clicked = st.sidebar.button("Update Actual Closes", use_container_width=True)
+
+if update_actuals_clicked:
+    update_result = update_actual_closes_in_log()
+    st.sidebar.caption(
+        f'Updated {update_result["updated"]} record(s); skipped {update_result["skipped"]}.'
+    )
 
 symbol = st.session_state.ticker.upper()
 raw_df = load_price_data(symbol, period)
@@ -1310,6 +1438,7 @@ with tab_ai:
             st.write(llm_parse_error)
 
         st.session_state[FORECAST_STATE_KEY] = build_forecast_result(
+            ticker=symbol,
             current_price=price,
             pred_price=pred_price,
             llm_price=llm_price,
@@ -1324,8 +1453,6 @@ with tab_ai:
         )
         if record_status == "supabase":
             st.caption("Prediction logged to Supabase for dynamic weighting.")
-        elif record_status == "google_sheets":
-            st.caption("Prediction logged to Google Sheets for dynamic weighting.")
         elif record_status == "csv":
             st.caption("Prediction logged locally for dynamic weighting.")
             if record_error:
@@ -1363,10 +1490,20 @@ with tab_ai:
             signal_text, signal_color = get_signal_style(value, price)
             extra_text = None
             if title == "Ensemble Price":
+                blend_label = "Dynamic blend" if forecast_result.get("weight_source") == "dynamic" else "Default blend"
                 extra_text = (
-                    f'Weighted blend: XGBoost {(1 - forecast_result["llm_conf"]):.0%} '
-                    f'+ LLM {forecast_result["llm_conf"]:.0%}'
+                    f'{blend_label}: XGBoost {forecast_result["weight_xgb"]:.0%} '
+                    f'+ LLM {forecast_result["weight_llm"]:.0%}'
                 )
+                if forecast_result.get("weight_source") == "dynamic":
+                    extra_text += f' | based on {forecast_result.get("weight_sample_count", 0)} completed runs'
+                else:
+                    extra_text += f' | waiting for {max(0, 5 - forecast_result.get("weight_sample_count", 0))} more completed runs'
+                if forecast_result.get("mae_xgb") is not None and forecast_result.get("mae_llm") is not None:
+                    extra_text += (
+                        f' | XGB MAE: {forecast_result["mae_xgb"]:.2f}'
+                        f' | LLM MAE: {forecast_result["mae_llm"]:.2f}'
+                    )
             if title == "LLM Price":
                 extra_text = f'Confidence: {forecast_result["llm_conf"]:.0%}'
             render_value_card(title, value, signal_text, signal_color, theme, extra_text=extra_text)
