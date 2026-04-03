@@ -1448,7 +1448,7 @@ with tab_ai:
             )
 
     if run_llm_clicked:
-        update_result = update_actual_closes_in_log()
+        update_actual_closes_in_log()
         llm_text = run_llm(llm_prompt)
         llm_price, llm_conf, llm_reason, llm_parse_error = parse_llm_response(llm_text, price)
 
@@ -1470,10 +1470,6 @@ with tab_ai:
             reference_close_price=price,
             forecast_result=st.session_state[FORECAST_STATE_KEY],
         )
-        if update_result["updated"] > 0 or update_result["skipped"] > 0:
-            st.caption(
-                f'Historical records refreshed: updated {update_result["updated"]}, skipped {update_result["skipped"]}.'
-            )
         if record_status == "supabase":
             st.caption("Prediction logged to Supabase for dynamic weighting.")
         elif record_status == "csv":
