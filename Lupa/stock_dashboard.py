@@ -556,9 +556,40 @@ def get_signal_style(value, reference):
     return "Bearish", "#ef4444"
 
 
+@st.cache_data(ttl=21600)
+def is_us_trading_day(check_date_str):
+    check_date = datetime.strptime(check_date_str, "%Y-%m-%d").date()
+    if check_date.weekday() >= 5:
+        return False
+
+    start = (check_date - timedelta(days=1)).strftime("%Y-%m-%d")
+    end = (check_date + timedelta(days=2)).strftime("%Y-%m-%d")
+    df = yf.download("SPY", start=start, end=end, progress=False, auto_adjust=False)
+
+    if df.empty:
+        try:
+            df = yf.Ticker("SPY").history(start=start, end=end, auto_adjust=False)
+        except Exception:
+            return False
+
+    if df.empty:
+        return False
+
+    if isinstance(df.columns, pd.MultiIndex):
+        try:
+            df = df.xs("SPY", axis=1, level=-1)
+        except Exception:
+            df.columns = df.columns.get_level_values(0)
+
+    for timestamp in df.index:
+        if pd.Timestamp(timestamp).date() == check_date:
+            return True
+    return False
+
+
 def get_next_trading_day(base_date):
     next_day = base_date + timedelta(days=1)
-    while next_day.weekday() >= 5:
+    while not is_us_trading_day(next_day.strftime("%Y-%m-%d")):
         next_day += timedelta(days=1)
     return next_day
 
@@ -566,8 +597,8 @@ def get_next_trading_day(base_date):
 def get_next_market_open(reference_time):
     candidate_date = reference_time.date()
 
-    if reference_time.weekday() >= 5:
-        while candidate_date.weekday() >= 5:
+    if not is_us_trading_day(candidate_date.strftime("%Y-%m-%d")):
+        while not is_us_trading_day(candidate_date.strftime("%Y-%m-%d")):
             candidate_date += timedelta(days=1)
     elif reference_time.time() >= datetime.min.replace(hour=16).time():
         candidate_date = get_next_trading_day(candidate_date)
@@ -601,7 +632,7 @@ def get_prediction_target_context(latest_trading_timestamp):
     market_date = market_now.date()
     market_open = market_now.replace(hour=9, minute=30, second=0, microsecond=0)
     market_close = market_now.replace(hour=16, minute=0, second=0, microsecond=0)
-    market_is_open_day = market_date.weekday() < 5
+    market_is_open_day = is_us_trading_day(market_date.strftime("%Y-%m-%d"))
     stable_completed_close = has_stable_completed_close(market_now)
 
     if market_is_open_day and market_open <= market_now < market_close:
