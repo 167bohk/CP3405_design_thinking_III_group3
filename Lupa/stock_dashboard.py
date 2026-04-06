@@ -556,24 +556,20 @@ def get_signal_style(value, reference):
     return "Bearish", "#ef4444"
 
 
-@st.cache_data(ttl=21600)
-def is_us_trading_day(check_date_str):
-    check_date = datetime.strptime(check_date_str, "%Y-%m-%d").date()
-    if check_date.weekday() >= 5:
-        return False
-
-    start = (check_date - timedelta(days=1)).strftime("%Y-%m-%d")
-    end = (check_date + timedelta(days=2)).strftime("%Y-%m-%d")
+@st.cache_data(ttl=86400)
+def get_us_trading_days_for_year(year):
+    start = f"{year}-01-01"
+    end = f"{year + 1}-01-10"
     df = yf.download("SPY", start=start, end=end, progress=False, auto_adjust=False)
 
     if df.empty:
         try:
             df = yf.Ticker("SPY").history(start=start, end=end, auto_adjust=False)
         except Exception:
-            return False
+            return set()
 
     if df.empty:
-        return False
+        return set()
 
     if isinstance(df.columns, pd.MultiIndex):
         try:
@@ -581,10 +577,18 @@ def is_us_trading_day(check_date_str):
         except Exception:
             df.columns = df.columns.get_level_values(0)
 
-    for timestamp in df.index:
-        if pd.Timestamp(timestamp).date() == check_date:
-            return True
-    return False
+    return {pd.Timestamp(timestamp).date().isoformat() for timestamp in df.index}
+
+
+def is_us_trading_day(check_date_str):
+    check_date = datetime.strptime(check_date_str, "%Y-%m-%d").date()
+    if check_date.weekday() >= 5:
+        return False
+
+    trading_days = get_us_trading_days_for_year(check_date.year)
+    if not trading_days:
+        return check_date.weekday() < 5
+    return check_date.isoformat() in trading_days
 
 
 def get_next_trading_day(base_date):
