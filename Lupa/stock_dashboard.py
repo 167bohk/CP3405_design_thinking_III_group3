@@ -58,6 +58,7 @@ FORECAST_STATE_KEY = "forecast_result"
 US_MARKET_TZ = ZoneInfo("America/New_York")
 FINBERT_MIN_AVAILABLE_MB = 900
 MARKET_CLOSE_STABILIZATION_HOURS = 2
+MAX_DYNAMIC_BLEND_AGE_DAYS = 30
 PREDICTION_LOG_PATH = os.path.join(os.path.dirname(__file__), "llm_prediction_log.csv")
 PREDICTION_LOG_COLUMNS = [
     "ticker",
@@ -414,28 +415,9 @@ def append_prediction_log_record(ticker, reference_close_price, forecast_result)
     return "csv", None
 
 
-def fetch_actual_close_for_target_date(ticker, target_date_str):
-    target_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
-    start = (target_date - timedelta(days=2)).strftime("%Y-%m-%d")
-    end = (target_date + timedelta(days=3)).strftime("%Y-%m-%d")
-    try:
-        df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=False)
-    except YFRateLimitError:
-        return None
-    except Exception:
-        df = pd.DataFrame()
-
+def normalize_download_history(df, ticker):
     if df.empty:
-        try:
-            ticker_history = yf.Ticker(ticker).history(start=start, end=end, auto_adjust=False)
-            df = ticker_history
-        except YFRateLimitError:
-            return None
-        except Exception:
-            return None
-
-    if df.empty:
-        return None
+        return df
 
     if isinstance(df.columns, pd.MultiIndex):
         try:
@@ -443,10 +425,48 @@ def fetch_actual_close_for_target_date(ticker, target_date_str):
         except Exception:
             df.columns = df.columns.get_level_values(0)
 
+    return df
+
+
+def fetch_actual_close_map_for_ticker(ticker, target_dates):
+    if not target_dates:
+        return {}
+
+    parsed_dates = [
+        datetime.strptime(str(target_date), "%Y-%m-%d").date()
+        for target_date in target_dates
+    ]
+    start = (min(parsed_dates) - timedelta(days=2)).strftime("%Y-%m-%d")
+    end = (max(parsed_dates) + timedelta(days=3)).strftime("%Y-%m-%d")
+
+    try:
+        df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=False)
+    except YFRateLimitError:
+        return {}
+    except Exception:
+        df = pd.DataFrame()
+
+    if df.empty:
+        try:
+            df = yf.Ticker(ticker).history(start=start, end=end, auto_adjust=False)
+        except YFRateLimitError:
+            return {}
+        except Exception:
+            return {}
+
+    df = normalize_download_history(df, ticker)
+    if df.empty:
+        return {}
+
+    close_map = {}
     for ts, row in df.iterrows():
-        if pd.Timestamp(ts).date() == target_date:
-            return float(row["Close"])
-    return None
+        close_map[pd.Timestamp(ts).date().isoformat()] = float(row["Close"])
+
+    return close_map
+
+
+def fetch_actual_close_for_target_date(ticker, target_date_str):
+    return fetch_actual_close_map_for_ticker(ticker, [target_date_str]).get(target_date_str)
 
 
 def update_actual_closes_in_log():
@@ -459,42 +479,45 @@ def update_actual_closes_in_log():
     updated = 0
     skipped = 0
 
-    for _, row in pending_df.iterrows():
-        record_id = row.get("id")
-        ticker = row["ticker"]
-        target_date = row["target_date"]
-        actual_close = fetch_actual_close_for_target_date(ticker, target_date)
-        if actual_close is None:
-            skipped += 1
-            continue
+    for ticker, ticker_rows in pending_df.groupby("ticker"):
+        target_dates = [str(target_date) for target_date in ticker_rows["target_date"].tolist()]
+        close_map = fetch_actual_close_map_for_ticker(ticker, target_dates)
 
-        xgb_abs_error = abs(float(row["xgb_pred_price"]) - actual_close)
-        llm_abs_error = abs(float(row["llm_pred_price"]) - actual_close)
-        ensemble_abs_error = abs(float(row["ensemble_price"]) - actual_close)
+        for _, row in ticker_rows.iterrows():
+            record_id = row.get("id")
+            target_date = str(row["target_date"])
+            actual_close = close_map.get(target_date)
+            if actual_close is None:
+                skipped += 1
+                continue
 
-        update_payload = {
-            "actual_close": actual_close,
-            "xgb_abs_error": xgb_abs_error,
-            "llm_abs_error": llm_abs_error,
-            "ensemble_abs_error": ensemble_abs_error,
-            "status": "completed",
-        }
+            xgb_abs_error = abs(float(row["xgb_pred_price"]) - actual_close)
+            llm_abs_error = abs(float(row["llm_pred_price"]) - actual_close)
+            ensemble_abs_error = abs(float(row["ensemble_price"]) - actual_close)
 
-        if supabase_config is not None and pd.notna(record_id):
-            supabase_request(
-                "PATCH",
-                f"/rest/v1/prediction_log?id=eq.{int(record_id)}",
-                update_payload,
-            )
-        else:
-            mask = (
-                (log_df["ticker"] == ticker)
-                & (log_df["target_date"] == target_date)
-                & (log_df["reference_close_date"] == row["reference_close_date"])
-            )
-            for key, value in update_payload.items():
-                log_df.loc[mask, key] = value
-        updated += 1
+            update_payload = {
+                "actual_close": actual_close,
+                "xgb_abs_error": xgb_abs_error,
+                "llm_abs_error": llm_abs_error,
+                "ensemble_abs_error": ensemble_abs_error,
+                "status": "completed",
+            }
+
+            if supabase_config is not None and pd.notna(record_id):
+                supabase_request(
+                    "PATCH",
+                    f"/rest/v1/prediction_log?id=eq.{int(record_id)}",
+                    update_payload,
+                )
+            else:
+                mask = (
+                    (log_df["ticker"] == ticker)
+                    & (log_df["target_date"] == target_date)
+                    & (log_df["reference_close_date"] == row["reference_close_date"])
+                )
+                for key, value in update_payload.items():
+                    log_df.loc[mask, key] = value
+            updated += 1
 
     if supabase_config is None and updated > 0:
         log_df.to_csv(PREDICTION_LOG_PATH, index=False)
@@ -526,10 +549,16 @@ def get_dynamic_blend_weights(ticker, fallback_llm_weight, min_samples=5, window
     if ticker_df.empty:
         return default_result
 
+    ticker_df["target_date"] = pd.to_datetime(ticker_df["target_date"], errors="coerce")
     ticker_df["created_at"] = pd.to_datetime(ticker_df["created_at"], errors="coerce")
     ticker_df["xgb_abs_error"] = pd.to_numeric(ticker_df["xgb_abs_error"], errors="coerce")
     ticker_df["llm_abs_error"] = pd.to_numeric(ticker_df["llm_abs_error"], errors="coerce")
-    ticker_df = ticker_df.dropna(subset=["xgb_abs_error", "llm_abs_error"]).sort_values("created_at")
+    cutoff_date = pd.Timestamp(datetime.now(ZoneInfo("Asia/Singapore")).date() - timedelta(days=MAX_DYNAMIC_BLEND_AGE_DAYS))
+    ticker_df = ticker_df.dropna(subset=["target_date", "xgb_abs_error", "llm_abs_error"])
+    ticker_df = ticker_df[ticker_df["target_date"] >= cutoff_date].sort_values("target_date")
+    if ticker_df.empty:
+        return default_result
+
     recent_df = ticker_df.tail(window)
     sample_count = len(recent_df)
 
