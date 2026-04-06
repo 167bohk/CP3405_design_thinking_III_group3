@@ -602,28 +602,64 @@ def get_signal_style(value, reference):
     return "Bearish", "#ef4444"
 
 
+def nth_weekday_of_month(year, month, weekday, occurrence):
+    first_day = datetime(year, month, 1).date()
+    offset = (weekday - first_day.weekday()) % 7
+    return first_day + timedelta(days=offset + (occurrence - 1) * 7)
+
+
+def last_weekday_of_month(year, month, weekday):
+    if month == 12:
+        next_month = datetime(year + 1, 1, 1).date()
+    else:
+        next_month = datetime(year, month + 1, 1).date()
+    current = next_month - timedelta(days=1)
+    while current.weekday() != weekday:
+        current -= timedelta(days=1)
+    return current
+
+
+def observed_holiday(holiday_date):
+    if holiday_date.weekday() == 5:
+        return holiday_date - timedelta(days=1)
+    if holiday_date.weekday() == 6:
+        return holiday_date + timedelta(days=1)
+    return holiday_date
+
+
+def calculate_easter_date(year):
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return datetime(year, month, day).date()
+
+
 @st.cache_data(ttl=86400)
-def get_us_trading_days_for_year(year):
-    start = f"{year}-01-01"
-    end = f"{year + 1}-01-10"
-    df = yf.download("SPY", start=start, end=end, progress=False, auto_adjust=False)
-
-    if df.empty:
-        try:
-            df = yf.Ticker("SPY").history(start=start, end=end, auto_adjust=False)
-        except Exception:
-            return set()
-
-    if df.empty:
-        return set()
-
-    if isinstance(df.columns, pd.MultiIndex):
-        try:
-            df = df.xs("SPY", axis=1, level=-1)
-        except Exception:
-            df.columns = df.columns.get_level_values(0)
-
-    return {pd.Timestamp(timestamp).date().isoformat() for timestamp in df.index}
+def get_us_market_holidays_for_year(year):
+    holidays = {
+        observed_holiday(datetime(year, 1, 1).date()),
+        nth_weekday_of_month(year, 1, 0, 3),   # MLK Day
+        nth_weekday_of_month(year, 2, 0, 3),   # Presidents' Day
+        calculate_easter_date(year) - timedelta(days=2),  # Good Friday
+        last_weekday_of_month(year, 5, 0),     # Memorial Day
+        observed_holiday(datetime(year, 6, 19).date()),   # Juneteenth
+        observed_holiday(datetime(year, 7, 4).date()),    # Independence Day
+        nth_weekday_of_month(year, 9, 0, 1),   # Labor Day
+        nth_weekday_of_month(year, 11, 3, 4),  # Thanksgiving
+        observed_holiday(datetime(year, 12, 25).date()),  # Christmas
+    }
+    return {holiday.isoformat() for holiday in holidays}
 
 
 def is_us_trading_day(check_date_str):
@@ -631,10 +667,7 @@ def is_us_trading_day(check_date_str):
     if check_date.weekday() >= 5:
         return False
 
-    trading_days = get_us_trading_days_for_year(check_date.year)
-    if not trading_days:
-        return check_date.weekday() < 5
-    return check_date.isoformat() in trading_days
+    return check_date.isoformat() not in get_us_market_holidays_for_year(check_date.year)
 
 
 def get_next_trading_day(base_date):
@@ -1464,7 +1497,7 @@ with metric_col4:
 
 _, sentiment_center, _ = st.columns([1, 2, 1])
 with sentiment_center:
-    st.plotly_chart(build_sentiment_gauge(sentiment, theme), use_container_width=False)
+    st.plotly_chart(build_sentiment_gauge(sentiment, theme), width="content")
     with st.expander("How Market Sentiment Is Calculated"):
         st.markdown(
             f"""
@@ -1497,7 +1530,7 @@ tab_chart, tab_ai, tab_almanac, tab_heat, tab_news = st.tabs(
 with tab_chart:
     st.plotly_chart(
         build_price_chart(df, theme),
-        use_container_width=True,
+        width="stretch",
         config={"scrollZoom": True},
     )
 
@@ -1527,7 +1560,7 @@ with tab_ai:
             run_llm_clicked = st.button(
                 "Run LLM Analysis",
                 key="llm_button",
-                use_container_width=True,
+                width="stretch",
             )
 
     if run_llm_clicked:
@@ -1616,7 +1649,7 @@ with tab_ai:
 with tab_heat:
     heatmap_df = load_heatmap_data()
     if not heatmap_df.empty:
-        st.plotly_chart(build_heatmap_chart(heatmap_df, theme), use_container_width=True)
+        st.plotly_chart(build_heatmap_chart(heatmap_df, theme), width="stretch")
     else:
         st.info("Heatmap data is temporarily unavailable.")
 
