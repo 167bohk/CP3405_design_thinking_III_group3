@@ -698,7 +698,14 @@ def get_prediction_target_context(latest_trading_timestamp):
     else:
         reference_date = market_date if market_date > latest_date else latest_date
         target_date = get_next_trading_day(reference_date)
-        next_open = get_next_market_open(market_now)
+        next_open = datetime(
+            target_date.year,
+            target_date.month,
+            target_date.day,
+            9,
+            30,
+            tzinfo=US_MARKET_TZ,
+        )
         target_label = f"US market closed; next session opens in {format_time_delta(next_open - market_now)}"
 
     return {
