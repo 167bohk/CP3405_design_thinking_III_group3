@@ -31,6 +31,11 @@ try:
 except ImportError:
     psutil = None
 
+try:
+    from yfinance.exceptions import YFRateLimitError
+except ImportError:
+    YFRateLimitError = Exception
+
 
 # ---------- App Setup: page metadata, API clients, shared constants ----------
 
@@ -413,10 +418,22 @@ def fetch_actual_close_for_target_date(ticker, target_date_str):
     target_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
     start = (target_date - timedelta(days=2)).strftime("%Y-%m-%d")
     end = (target_date + timedelta(days=3)).strftime("%Y-%m-%d")
-    df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=False)
+    try:
+        df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=False)
+    except YFRateLimitError:
+        return None
+    except Exception:
+        df = pd.DataFrame()
+
     if df.empty:
-        ticker_history = yf.Ticker(ticker).history(start=start, end=end, auto_adjust=False)
-        df = ticker_history
+        try:
+            ticker_history = yf.Ticker(ticker).history(start=start, end=end, auto_adjust=False)
+            df = ticker_history
+        except YFRateLimitError:
+            return None
+        except Exception:
+            return None
+
     if df.empty:
         return None
 
@@ -1478,7 +1495,10 @@ with tab_ai:
             )
 
     if run_llm_clicked:
-        update_actual_closes_in_log()
+        try:
+            update_actual_closes_in_log()
+        except YFRateLimitError:
+            pass
         llm_text = run_llm(llm_prompt)
         llm_price, llm_conf, llm_reason, llm_parse_error = parse_llm_response(llm_text, price)
 
